@@ -112,9 +112,8 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     }, 0);
   };
 
-  /** 监听滚动事件，判断用户是否主动上翻（流式输出期间跳过） */
+  /** 监听滚动事件，判断用户是否主动上翻 */
   const onScroll = () => {
-    if (streamingRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
