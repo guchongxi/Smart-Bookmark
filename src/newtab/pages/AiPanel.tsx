@@ -385,7 +385,20 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         messages: forApi,
         signal: ctrl.signal,
         tools,
-        onThinking: settings.showThinking ? (delta) => { thinkingAcc += delta; } : undefined,
+        onThinking: settings.showThinking ? (delta) => {
+          thinkingAcc += delta;
+          setMessages((prev) => {
+            const copy = [...prev];
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].role === "assistant") {
+                copy[i] = { ...copy[i], thinking: thinkingAcc };
+                break;
+              }
+            }
+            return copy;
+          });
+          scrollToBottom();
+        } : undefined,
         onDelta: (d) => {
           acc += d;
           setMessages((prev) => {
@@ -399,19 +412,6 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         onToolCall: makeOnToolCall(),
       });
       if (await checkToolCallsFromStream()) return;
-      // 将思考内容写入最后一条 assistant 消息
-      if (thinkingAcc) {
-        setMessages((prev) => {
-          const next = [...prev];
-          for (let i = next.length - 1; i >= 0; i--) {
-            if (next[i].role === "assistant") {
-              next[i] = { ...next[i], thinking: thinkingAcc };
-              break;
-            }
-          }
-          return next;
-        });
-      }
       setMessages((prev) => { persist(prev); return prev; });
     } catch (err: any) {
       handleStreamError(err);
@@ -892,9 +892,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                       isUser && "whitespace-pre-wrap",
                     )}
                   >
-                    {/* 思考过程折叠块 */}
+                    {/* 思考过程折叠块：有 thinking 无 content 时展开（思考中），有 content 后折叠 */}
                     {!isUser && m.thinking && (
-                      <ThinkingBlock content={m.thinking} />
+                      <ThinkingBlock content={m.thinking} expanded={!m.content} />
                     )}
                     {m.content
                       ? isUser
@@ -946,8 +946,12 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   );
 }
 
-function ThinkingBlock({ content }: { content: string }) {
-  const [open, setOpen] = useState(false);
+function ThinkingBlock({ content, expanded }: { content: string; expanded?: boolean }) {
+  const [open, setOpen] = useState(expanded ?? false);
+  // 外部 expanded 变化时同步（思考阶段→展开，回复阶段→折叠）
+  useEffect(() => {
+    if (expanded !== undefined) setOpen(expanded);
+  }, [expanded]);
   return (
     <div className="mb-2 rounded-lg border border-muted bg-muted/30">
       <button
@@ -967,7 +971,10 @@ function ThinkingBlock({ content }: { content: string }) {
         思考过程
       </button>
       {open && (
-        <div className="border-t border-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground" style={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
+        <div
+          className="border-t border-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+          style={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}
+        >
           {content}
         </div>
       )}
