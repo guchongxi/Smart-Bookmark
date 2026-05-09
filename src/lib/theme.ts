@@ -33,8 +33,8 @@ export async function initTheme() {
   applyThemePreset(s.themePreset);
   onSettingsChange((next) => {
     applyTheme(next.theme);
-    applyAccent(next.accentPreset ?? "linear");
-    applyThemePreset(next.themePreset ?? DEFAULT_THEME_PRESET);
+    applyAccent(next.accentPreset);
+    applyThemePreset(next.themePreset);
   });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", async () => {
     const cur = await getSettings();
