@@ -91,11 +91,10 @@ export interface Settings {
   aiModel: string;
   aiApiKey: string;
   aiBaseUrl: string;
+  /** 是否启用 AI 思考内容展示 */
+  showThinking?: boolean;
   cardDensity: "comfy" | "compact";
   language: Language;
-  floatingBall: boolean;
-  /** 禁用悬浮球的域名列表（域名级禁用） */
-  floatingDisabledDomains: string[];
   compareEngines: string[];
   customEngines: CustomEngine[];
   expandedFolders: string[];
@@ -174,9 +173,34 @@ export interface TrendingRepo {
   };
 }
 
+export interface AiToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+export interface AiToolResult {
+  toolCallId: string;
+  success: boolean;
+  message: string;
+  data?: unknown;
+}
+
 export interface AiMessage {
-  role: "system" | "user" | "assistant";
+  role: "system" | "user" | "assistant" | "tool" | "tool-confirm";
   content: string;
   /** 客户端消息时间戳（不发给 API） */
   at?: number;
+  toolCalls?: AiToolCall[];
+  toolResult?: AiToolResult;
+  /** AI 思考过程文本 */
+  thinking?: string;
+}
+
+export interface AiSession {
+  id: string;
+  title: string;
+  messages: AiMessage[];
+  createdAt: number;
+  updatedAt: number;
 }

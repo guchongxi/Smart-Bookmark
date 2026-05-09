@@ -123,6 +123,15 @@ const zh: Dict = {
   "settings.githubTokenSave": "保存",
   "settings.githubTokenClear": "清空",
   "settings.githubTokenCreate": "创建 Token",
+  "settings.favicon": "书签图标",
+  "settings.faviconReset": "重置无效图标",
+  "settings.faviconHint":
+    "加载顺序：网站缓存 → /favicon.ico → 页面 <link> 标签 → 域名首字母。点击重置可清除加载失败的缓存，刷新页面后重新获取。",
+  "settings.faviconResetDone": "已重置 {n} 个无效图标缓存",
+  "settings.faviconResetNone": "没有无效图标缓存",
+  "settings.bookmarkSummaryCache": "书签摘要缓存",
+  "settings.bookmarkSummaryCacheHint": "AI 对话时使用的书签全量摘要，有效期 7 天。书签增删改时会自动失效。",
+  "settings.bookmarkSummaryCacheClear": "清除摘要缓存",
 
   "cleaner.profile": "书签画像",
   "cleaner.total": "书签总数",
@@ -159,6 +168,16 @@ const zh: Dict = {
   "ai.suggestFindDups": "找出可能重复的书签",
   "ai.suggestRecommend": "根据我的书签推荐相关网站",
   "ai.suggestSummary": "总结我最常收藏的领域",
+  "ai.newChat": "新建对话",
+  "ai.emptySessions": "还没有对话",
+  "ai.emptySessionsHint": "点击上方按钮开始新对话",
+  "ai.deleteSession": "删除对话",
+  "ai.deleteConfirm": "确定删除这个对话？",
+  "ai.collapseSidebar": "收起侧栏",
+  "ai.expandSidebar": "展开侧栏",
+  "ai.toolConfirmTitle": "代理想要执行：",
+  "ai.toolConfirm": "确认执行",
+  "ai.toolCancel": "取消",
 
   "compare.title": "对比搜索",
   "compare.placeholder": "输入查询词，同时在多个搜索引擎中打开…",
@@ -215,14 +234,10 @@ const zh: Dict = {
   "settings.apiKeyPh": "sk-…（仅存于本地 chrome.storage）",
   "settings.apiKeyNotice":
     "API Key 仅保存在浏览器本地存储，不会上传任何服务端。若你使用受限网络，可能需要自备代理。",
+  "settings.showThinking": "显示思考过程",
+  "settings.showThinkingHint": "开启后，AI 回复上方会显示模型的思考过程（需模型支持 extended thinking）。",
   "settings.extras": "扩展功能",
   "settings.language": "语言",
-  "settings.floatingBall": "网页内悬浮标签",
-  "settings.floatingBallHint":
-    "在任意网页右侧边缘显示一个贴边标签，点击可呼出搜索和命令。",
-  "settings.floatingDisabledDomains": "已禁用的网站",
-  "settings.floatingDisabledDomainsEmpty": "暂无被禁用的网站",
-  "settings.floatingDisabledDomainsRemove": "重新启用",
   "settings.compareEngines": "对比搜索引擎",
 
   "qr.title": "二维码",
@@ -230,24 +245,11 @@ const zh: Dict = {
   "qr.copyUrl": "复制链接",
   "qr.download": "下载 PNG",
 
-  "float.search": "搜索书签",
-  "float.openSidePanel": "打开侧边栏",
-  "float.openCleaner": "清理中心",
-  "float.copyUrl": "复制当前 URL",
-  "float.qr": "生成二维码",
-  "float.hide": "隐藏悬浮球",
-
-  "side.title": "Smart Bookmark",
-  "side.placeholder": "搜索书签…",
-  "side.empty": "没有匹配的书签",
-
   "popup.dashboard": "打开书签看板",
   "popup.cleaner": "书签清理中心",
   "popup.ai": "AI 助手",
-  "popup.sidepanel": "打开侧边栏",
   "popup.compare": "对比搜索",
   "popup.backup": "备份 / 导出",
-  "popup.shortcut": "快捷键：Alt+B 打开侧边栏，Alt+Shift+C 打开清理中心",
 };
 
 const en: Dict = {
@@ -409,6 +411,16 @@ const en: Dict = {
   "ai.suggestFindDups": "Find potential duplicate bookmarks",
   "ai.suggestRecommend": "Recommend related sites based on my bookmarks",
   "ai.suggestSummary": "Summarize the domains I save most",
+  "ai.newChat": "New Chat",
+  "ai.emptySessions": "No conversations yet",
+  "ai.emptySessionsHint": "Click the button above to start a new chat",
+  "ai.deleteSession": "Delete chat",
+  "ai.deleteConfirm": "Delete this conversation?",
+  "ai.collapseSidebar": "Collapse sidebar",
+  "ai.expandSidebar": "Expand sidebar",
+  "ai.toolConfirmTitle": "Agent wants to execute:",
+  "ai.toolConfirm": "Confirm",
+  "ai.toolCancel": "Cancel",
 
   "compare.title": "Compare search",
   "compare.placeholder":
@@ -466,40 +478,31 @@ const en: Dict = {
   "settings.apiKeyPh": "sk-… (stored only in local chrome.storage)",
   "settings.apiKeyNotice":
     "The API key lives only in local browser storage and is never uploaded to any server.",
+  "settings.showThinking": "Show thinking process",
+  "settings.showThinkingHint": "When enabled, the model's thinking process is shown above the reply (requires extended thinking support).",
   "settings.extras": "Extras",
   "settings.language": "Language",
-  "settings.floatingBall": "In-page edge tab",
-  "settings.floatingBallHint":
-    "Show a slim tab pinned to the right edge of any web page for quick search and commands.",
-  "settings.floatingDisabledDomains": "Disabled sites",
-  "settings.floatingDisabledDomainsEmpty": "No sites are disabled",
-  "settings.floatingDisabledDomainsRemove": "Re-enable",
   "settings.compareEngines": "Compare-search engines",
+  "settings.favicon": "Bookmark icon",
+  "settings.faviconReset": "Reset invalid icons",
+  "settings.faviconHint":
+    "Loading order: site cache → /favicon.ico → page <link> tag → domain initial. Click reset to clear failed caches; icons will be re-fetched on next page load.",
+  "settings.faviconResetDone": "Reset {n} invalid icon caches",
+  "settings.faviconResetNone": "No invalid icon caches",
+  "settings.bookmarkSummaryCache": "Bookmark summary cache",
+  "settings.bookmarkSummaryCacheHint": "Full bookmark summary used in AI conversations. Valid for 7 days. Auto-invalidates on bookmark changes.",
+  "settings.bookmarkSummaryCacheClear": "Clear summary cache",
 
   "qr.title": "QR code",
   "qr.scan": "Scan to visit",
   "qr.copyUrl": "Copy URL",
   "qr.download": "Download PNG",
 
-  "float.search": "Search bookmarks",
-  "float.openSidePanel": "Open side panel",
-  "float.openCleaner": "Cleaner",
-  "float.copyUrl": "Copy current URL",
-  "float.qr": "Generate QR code",
-  "float.hide": "Hide floating ball",
-
-  "side.title": "Smart Bookmark",
-  "side.placeholder": "Search bookmarks…",
-  "side.empty": "No matching bookmarks",
-
   "popup.dashboard": "Open dashboard",
   "popup.cleaner": "Bookmark cleaner",
   "popup.ai": "AI assistant",
-  "popup.sidepanel": "Open side panel",
   "popup.compare": "Compare search",
   "popup.backup": "Backup / export",
-  "popup.shortcut":
-    "Shortcuts: Alt+B open side panel, Alt+Shift+C open cleaner",
 };
 
 const DICTS: Record<"zh" | "en", Dict> = { zh, en };

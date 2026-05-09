@@ -10,6 +10,8 @@ import { testAi } from "@/lib/ai";
 import { BUILTIN_ENGINES, faviconFor } from "@/lib/engines";
 import { Check, CheckCircle2, XCircle, Loader2, Flame, ExternalLink } from "lucide-react";
 import { COMMON_LANGUAGES, clearTrendingCache } from "@/lib/github";
+import { clearAllNoIconCache } from "@/lib/favicon";
+import { clearSummaryCache } from "@/lib/bookmarkSummaryCache";
 import type { TrendingMode, TrendingRange, TrendingSort } from "@/types";
 import { toast } from "@/components/ui/toast";
 import { THEME_PRESETS } from "@/lib/themePresets";
@@ -258,6 +260,45 @@ export default function SettingsPage() {
           <CardTitle>{t("settings.extras")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          <Row label={t("settings.favicon")}>
+            <div className="space-y-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  const count = await clearAllNoIconCache();
+                  toast(
+                    count > 0
+                      ? t("settings.faviconResetDone").replace("{n}", String(count))
+                      : t("settings.faviconResetNone"),
+                    count > 0 ? "success" : "info",
+                  );
+                }}
+              >
+                {t("settings.faviconReset")}
+              </Button>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.faviconHint")}
+              </p>
+            </div>
+          </Row>
+          <Row label={t("settings.bookmarkSummaryCache")}>
+            <div className="space-y-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await clearSummaryCache();
+                  toast(t("settings.bookmarkSummaryCacheClear") + " ✓", "success");
+                }}
+              >
+                {t("settings.bookmarkSummaryCacheClear")}
+              </Button>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.bookmarkSummaryCacheHint")}
+              </p>
+            </div>
+          </Row>
           <Row label={t("settings.language")}>
             <div className="flex gap-2">
               {(
@@ -278,49 +319,6 @@ export default function SettingsPage() {
                   {label}
                 </Button>
               ))}
-            </div>
-          </Row>
-          <Row label={t("settings.floatingBall")}>
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={s.floatingBall}
-                onCheckedChange={(v) => update({ floatingBall: v })}
-              />
-              <span className="text-xs text-muted-foreground">
-                {t("settings.floatingBallHint")}
-              </span>
-            </div>
-          </Row>
-          <Row label={t("settings.floatingDisabledDomains")}>
-            <div className="flex flex-wrap gap-2">
-              {(s.floatingDisabledDomains ?? []).length === 0 ? (
-                <span className="text-xs text-muted-foreground">
-                  {t("settings.floatingDisabledDomainsEmpty")}
-                </span>
-              ) : (
-                (s.floatingDisabledDomains ?? []).map((d) => (
-                  <span
-                    key={d}
-                    className="group inline-flex items-center gap-1 rounded-full border bg-muted/60 px-2.5 py-1 text-xs"
-                  >
-                    <span className="font-medium">{d}</span>
-                    <button
-                      type="button"
-                      className="ml-1 rounded-full p-0.5 text-muted-foreground transition hover:bg-background hover:text-foreground"
-                      title={t("settings.floatingDisabledDomainsRemove")}
-                      onClick={() =>
-                        update({
-                          floatingDisabledDomains: (
-                            s.floatingDisabledDomains ?? []
-                          ).filter((x) => x !== d),
-                        })
-                      }
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                    </button>
-                  </span>
-                ))
-              )}
             </div>
           </Row>
         </CardContent>
@@ -415,6 +413,17 @@ export default function SettingsPage() {
                   </span>
                 </span>
               )}
+            </div>
+          </Row>
+          <Row label={t("settings.showThinking")}>
+            <div className="flex items-center gap-3">
+              <Switch
+                checked={s.showThinking ?? false}
+                onCheckedChange={(v) => update({ showThinking: v })}
+              />
+              <span className="text-xs text-muted-foreground">
+                {t("settings.showThinkingHint")}
+              </span>
             </div>
           </Row>
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">

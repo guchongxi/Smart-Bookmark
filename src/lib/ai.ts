@@ -1,7 +1,39 @@
 import type { AiMessage, Settings } from "@/types";
 
 function toApiMessages(messages: AiMessage[]) {
-  return messages.map((m) => ({ role: m.role, content: m.content }));
+  const result: unknown[] = [];
+  for (const m of messages) {
+    if (m.role === "tool") {
+      result.push({
+        role: "tool",
+        tool_call_id: m.toolResult?.toolCallId ?? "",
+        content: m.content,
+      });
+    } else if (m.role === "assistant" && m.toolCalls?.length) {
+      result.push({
+        role: "assistant",
+        content: m.content || null,
+        tool_calls: m.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: "function",
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.args),
+          },
+        })),
+      });
+    } else if (m.role !== "system" && m.role !== "tool-confirm") {
+      result.push({ role: m.role, content: m.content });
+    }
+  }
+  return result;
+}
+
+export interface ToolCallDelta {
+  id: string;
+  name?: string;
+  arguments?: string;
+  done?: boolean;
 }
 
 export interface ChatOptions {
@@ -9,20 +41,30 @@ export interface ChatOptions {
   messages: AiMessage[];
   signal?: AbortSignal;
   onDelta?: (delta: string) => void;
+  onToolCall?: (call: ToolCallDelta) => void;
+  onThinking?: (delta: string) => void;
+  tools?: unknown[];
 }
 
-export async function chat({ settings, messages, signal, onDelta }: ChatOptions): Promise<string> {
-  if (settings.aiProvider === "openai") return chatOpenAI({ settings, messages, signal, onDelta });
-  if (settings.aiProvider === "anthropic") return chatAnthropic({ settings, messages, signal, onDelta });
+export async function chat({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
+  if (settings.aiProvider === "openai") return chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onThinking, tools });
+  if (settings.aiProvider === "anthropic") return chatAnthropic({ settings, messages, signal, onDelta, onToolCall, onThinking, tools });
   throw new Error("AI 未启用，请在设置中配置 Provider 与 API Key。");
 }
 
-async function chatOpenAI({ settings, messages, signal, onDelta }: ChatOptions): Promise<string> {
+async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
   if (!settings.aiApiKey) throw new Error("缺少 OpenAI API Key");
   const base = (settings.aiBaseUrl || "https://api.openai.com/v1").replace(
     /\/+$/,
     "",
   );
+  const body: Record<string, unknown> = {
+    model: settings.aiModel || "gpt-4o-mini",
+    messages: toApiMessages(messages),
+    stream: true,
+  };
+  if (tools?.length) body.tools = tools;
+
   const res = await fetch(`${base}/chat/completions`, {
     method: "POST",
     signal,
@@ -30,11 +72,7 @@ async function chatOpenAI({ settings, messages, signal, onDelta }: ChatOptions):
       "Content-Type": "application/json",
       Authorization: `Bearer ${settings.aiApiKey}`,
     },
-    body: JSON.stringify({
-      model: settings.aiModel || "gpt-4o-mini",
-      messages: toApiMessages(messages),
-      stream: true,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
@@ -43,16 +81,42 @@ async function chatOpenAI({ settings, messages, signal, onDelta }: ChatOptions):
   return await readSse(res.body, (evt) => {
     try {
       const j = JSON.parse(evt);
-      const delta = j.choices?.[0]?.delta?.content ?? "";
-      if (delta) onDelta?.(delta);
-      return delta;
+      const choice = j.choices?.[0];
+      if (!choice) return "";
+      const delta = choice.delta;
+
+      const text = delta?.content ?? "";
+      if (text) onDelta?.(text);
+
+      // 处理 reasoning content（o1/o3 系列）
+      const reasoning = delta?.reasoning_content;
+      if (reasoning && onThinking) {
+        onThinking(reasoning);
+      }
+
+      if (delta?.tool_calls && onToolCall) {
+        for (const tc of delta.tool_calls) {
+          onToolCall({
+            id: tc.id ?? "",
+            name: tc.function?.name,
+            arguments: tc.function?.arguments,
+          });
+        }
+      }
+
+      // finish_reason 到达时标记所有 tool call 完成
+      if (choice.finish_reason && onToolCall) {
+        onToolCall({ id: "", done: true });
+      }
+
+      return text;
     } catch {
       return "";
     }
   });
 }
 
-async function chatAnthropic({ settings, messages, signal, onDelta }: ChatOptions): Promise<string> {
+async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
   if (!settings.aiApiKey) throw new Error("缺少 Anthropic API Key");
   const sys = messages.find((m) => m.role === "system")?.content ?? "";
   const rest = messages.filter((m) => m.role !== "system");
@@ -60,6 +124,49 @@ async function chatAnthropic({ settings, messages, signal, onDelta }: ChatOption
     /\/+$/,
     "",
   );
+
+  // 转换 tool 结果为 Anthropic content 格式
+  const apiMessages: unknown[] = [];
+  for (const m of rest) {
+    if (m.role === "tool") {
+      apiMessages.push({
+        role: "user",
+        content: [{
+          type: "tool_result",
+          tool_use_id: m.toolResult?.toolCallId ?? "",
+          content: m.content,
+        }],
+      });
+    } else if (m.role === "assistant" && m.toolCalls?.length) {
+      const content: unknown[] = [];
+      if (m.content) content.push({ type: "text", text: m.content });
+      for (const tc of m.toolCalls) {
+        content.push({
+          type: "tool_use",
+          id: tc.id,
+          name: tc.name,
+          input: tc.args,
+        });
+      }
+      apiMessages.push({ role: "assistant", content });
+    } else if (m.role !== "tool-confirm") {
+      apiMessages.push({ role: m.role, content: m.content });
+    }
+  }
+
+  const body: Record<string, unknown> = {
+    model: settings.aiModel || "claude-3-5-sonnet-latest",
+    max_tokens: 1024,
+    system: sys || undefined,
+    messages: apiMessages,
+    stream: true,
+  };
+  if (tools?.length) body.tools = tools;
+
+  if (settings.showThinking) {
+    body.thinking = { type: "enabled", budget_tokens: 10000 };
+  }
+
   const res = await fetch(`${base}/v1/messages`, {
     method: "POST",
     signal,
@@ -69,25 +176,60 @@ async function chatAnthropic({ settings, messages, signal, onDelta }: ChatOption
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body: JSON.stringify({
-      model: settings.aiModel || "claude-3-5-sonnet-latest",
-      max_tokens: 1024,
-      system: sys || undefined,
-      messages: toApiMessages(rest),
-      stream: true,
-    }),
+    body: JSON.stringify(body),
   });
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
     throw new Error(`Anthropic ${res.status}: ${text.slice(0, 200)}`);
   }
+
+  const toolCallBuffers = new Map<string, { id: string; name: string; inputJson: string; _done?: boolean }>();
+
   return await readSse(res.body, (evt) => {
     try {
       const j = JSON.parse(evt);
-      if (j.type === "content_block_delta") {
-        const delta = j.delta?.text ?? "";
-        if (delta) onDelta?.(delta);
-        return delta;
+
+      if (j.type === "content_block_start" && j.content_block?.type === "tool_use") {
+        const id = j.content_block.id;
+        toolCallBuffers.set(id, { id, name: j.content_block.name, inputJson: "" });
+      }
+
+      if (j.type === "content_block_delta" && j.delta?.type === "input_json_delta" && onToolCall) {
+        const lastKey = [...toolCallBuffers.keys()].pop();
+        if (lastKey) {
+          const buf = toolCallBuffers.get(lastKey)!;
+          buf.inputJson += j.delta.partial_json;
+          onToolCall({ id: buf.id, name: buf.name, arguments: j.delta.partial_json });
+        }
+      }
+
+      if (j.type === "content_block_stop" && onToolCall) {
+        for (const [, buf] of toolCallBuffers) {
+          if (buf.inputJson && !buf._done) {
+            buf._done = true;
+            onToolCall({ id: buf.id, done: true });
+          }
+        }
+      }
+
+      if (j.type === "message_delta" && j.delta?.stop_reason === "tool_use" && onToolCall) {
+        for (const [, buf] of toolCallBuffers) {
+          if (!buf._done) {
+            buf._done = true;
+            onToolCall({ id: buf.id, done: true });
+          }
+        }
+        toolCallBuffers.clear();
+      }
+
+      // 处理 thinking 内容
+      if (j.type === "content_block_delta" && j.delta?.type === "thinking_delta" && j.delta?.thinking) {
+        onThinking?.(j.delta.thinking);
+      }
+
+      if (j.type === "content_block_delta" && j.delta?.type === "text_delta" && j.delta?.text) {
+        onDelta?.(j.delta.text);
+        return j.delta.text;
       }
     } catch {}
     return "";

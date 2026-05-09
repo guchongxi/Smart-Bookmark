@@ -15,8 +15,6 @@ export const DEFAULT_SETTINGS: Settings = {
   aiBaseUrl: "",
   cardDensity: "comfy",
   language: "auto",
-  floatingBall: false,
-  floatingDisabledDomains: [],
   compareEngines: ["google", "bing", "duckduckgo"],
   customEngines: [],
   expandedFolders: [],

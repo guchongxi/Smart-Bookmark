@@ -5,10 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function faviconOf(url: string, size = 32): string {
+export function faviconOf(url: string, _size = 32): string {
   try {
     const u = new URL(url);
-    return `https://www.google.com/s2/favicons?domain=${u.hostname}&sz=${size}`;
+    // 直接请求网站本身的 favicon，不经过任何第三方
+    return `${u.origin}/favicon.ico`;
   } catch {
     return "";
   }

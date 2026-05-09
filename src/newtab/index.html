@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smart Bookmark</title>
+    <style>
+      /* 系统暗色模式下立即设置深色背景，避免白屏闪烁 */
+      @media (prefers-color-scheme: dark) {
+        :root { color-scheme: dark; background-color: hsl(222.2, 84%, 4.9%); }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

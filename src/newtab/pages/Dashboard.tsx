@@ -6,17 +6,21 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   getTree,
   flatten,
   findFolder,
   moveBookmark,
+  removeBookmark,
 } from "@/lib/bookmarks";
 import type { BookmarkNode, FlatBookmark, Settings, TrendingMode, TrendingRange } from "@/types";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { cn, faviconOf, hostnameOf } from "@/lib/utils";
+import { cn, hostnameOf } from "@/lib/utils";
+import { FaviconImg } from "@/components/FaviconImg";
+import { refreshFavicon } from "@/hooks/useFavicon";
 import {
   Search,
   ExternalLink,
@@ -26,11 +30,14 @@ import {
   Folder,
   History as HistoryIcon,
   ChevronRight,
+  ChevronDown,
   X,
   Flame,
   Clock,
   Sparkles,
   TrendingUp,
+  LayoutGrid,
+  LayoutList,
 } from "lucide-react";
 import TrendingPanel from "@/components/TrendingPanel";
 import { rangeToWindowDays } from "@/lib/github";
@@ -88,6 +95,26 @@ export default function Dashboard({
     | null
   >(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  // favicon 刷新 key，key 变化时触发重新获取
+  const [faviconKeys, setFaviconKeys] = useState<Record<string, number>>({});
+  const [viewMode, setViewMode] = useState<"flat" | "grouped">("flat");
+
+  // 从持久化存储恢复视图模式
+  useEffect(() => {
+    chrome.storage.local.get("viewMode", (data) => {
+      if (data.viewMode === "flat" || data.viewMode === "grouped") {
+        setViewMode(data.viewMode);
+      }
+    });
+  }, []);
+
+  // 视图模式变更时持久化
+  const onViewModeChange = useCallback((mode: "flat" | "grouped") => {
+    setViewMode(mode);
+    chrome.storage.local.set({ viewMode: mode });
+  }, []);
+  // 分组视图中收起的区块（默认全部展开）
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [topSites, setTopSites] = useState<TopSite[]>([]);
   const [historyHits, setHistoryHits] = useState<HistoryHit[]>([]);
   const [searchFocused, setSearchFocused] = useState(false);
@@ -188,16 +215,20 @@ export default function Dashboard({
     }
   }, [tree, selected]);
 
+  const matchesQuery = useCallback(
+    (b: { title: string; url: string; path: string }, q: string) =>
+      !q ||
+      b.title.toLowerCase().includes(q) ||
+      b.url.toLowerCase().includes(q) ||
+      b.path.toLowerCase().includes(q),
+    [],
+  );
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return items;
-    return items.filter(
-      (b) =>
-        b.title.toLowerCase().includes(q) ||
-        b.url.toLowerCase().includes(q) ||
-        b.path.toLowerCase().includes(q),
-    );
-  }, [items, query]);
+    return items.filter((b) => matchesQuery(b, q));
+  }, [items, query, matchesQuery]);
 
   const pageCount = Math.max(
     1,
@@ -217,6 +248,62 @@ export default function Dashboard({
     const start = (page - 1) * pageSize;
     return filtered.slice(start, start + pageSize);
   }, [filtered, page, pageSize]);
+
+  // 分组视图数据：直接子项 + 子文件夹区块
+  const groupedData = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    if (!selected) return { directItems: items.filter((b) => matchesQuery(b, q)), sections: [] };
+
+    const folder = findFolder(tree, selected);
+    if (!folder) return { directItems: items, sections: [] };
+
+    const children = folder.children ?? [];
+    // 直接子项（有 url 的）
+    const directItems = children
+      .filter((c) => c.url)
+      .map((c, i) => ({
+        id: c.id,
+        parentId: c.parentId,
+        title: c.title || c.url!,
+        url: c.url!,
+        path: "",
+        dateAdded: c.dateAdded,
+        index: i,
+      }));
+
+    // 子文件夹（无 url 的）
+    const sections = children
+      .filter((c) => !c.url && c.id !== "0")
+      .map((subFolder) => {
+        const flatBookmarks = flatten([subFolder], "");
+        return {
+          id: subFolder.id,
+          title: subFolder.title || "(未命名)",
+          count: flatBookmarks.length,
+          items: flatBookmarks.map((b, i) => ({
+            ...b,
+            index: i,
+          })),
+        };
+      })
+      .filter((s) => s.count > 0);
+
+    // 过滤
+    if (q) {
+      return {
+        directItems: directItems.filter((b) => matchesQuery(b, q)),
+        sections: sections
+          .map((s) => ({
+            ...s,
+            items: s.items.filter((b) => matchesQuery(b, q)),
+          }))
+          .filter((s) => s.items.length > 0),
+      };
+    }
+
+    return { directItems, sections };
+  }, [tree, selected, items, query, matchesQuery]);
 
   const onChangePageSize = (n: number) => {
     setPageSize(n);
@@ -315,6 +402,22 @@ export default function Dashboard({
   };
 
   const closeCtx = useCallback(() => setCtxMenu(null), []);
+
+  const gridClassName = settings.cardDensity === "compact"
+    ? "grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8"
+    : "grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6";
+
+  const handleDragEnd = useCallback(() => {
+    document.body.style.cursor = "";
+    setDragId(null);
+    setOverId(null);
+  }, []);
+
+  const handleBookmarkContextMenu = useCallback((e: React.MouseEvent, url: string, title: string, id: string) => {
+    e.preventDefault();
+    setCtxMenu({ id, url, title, x: e.clientX, y: e.clientY });
+  }, []);
+
   useEffect(() => {
     if (!ctxMenu) return;
     const fn = () => closeCtx();
@@ -589,13 +692,10 @@ export default function Dashboard({
                       rel="noreferrer"
                       className="flex items-center gap-2 border-t bg-white px-4 py-2 text-sm transition hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
                     >
-                      <img
-                        src={faviconOf(h.url, 16)}
-                        alt=""
+                      <FaviconImg
+                        url={h.url}
+                        size={16}
                         className="h-4 w-4 rounded"
-                        onError={(e) =>
-                          (e.currentTarget.style.visibility = "hidden")
-                        }
                       />
                       <span className="flex-1 truncate">{h.title}</span>
                       <span className="truncate text-xs text-muted-foreground">
@@ -624,13 +724,10 @@ export default function Dashboard({
                 title={s.url}
               >
                 <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background shadow-sm ring-1 ring-border transition group-hover:-translate-y-0.5 group-hover:shadow-md">
-                  <img
-                    src={faviconOf(s.url, 64)}
-                    alt=""
+                  <FaviconImg
+                    url={s.url}
+                    size={64}
                     className="h-7 w-7 rounded-full"
-                    onError={(e) =>
-                      (e.currentTarget.style.visibility = "hidden")
-                    }
                   />
                 </div>
                 <div className="w-full truncate text-center text-[11px] text-muted-foreground">
@@ -684,13 +781,10 @@ export default function Dashboard({
                         className="group flex items-center gap-2.5 rounded-md px-2 py-1.5 transition hover:bg-accent"
                       >
                         <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-background ring-1 ring-border">
-                          <img
-                            src={faviconOf(s.url, 32)}
-                            alt=""
+                          <FaviconImg
+                            url={s.url}
+                            size={32}
                             className="h-4 w-4 rounded"
-                            onError={(e) =>
-                              (e.currentTarget.style.visibility = "hidden")
-                            }
                           />
                         </div>
                         <div className="min-w-0 flex-1">
@@ -886,7 +980,36 @@ export default function Dashboard({
                 · 共 {filtered.length} 个
                 {query.trim() ? "（已过滤）" : ""}
               </span>
-              {pageSize !== Infinity && filtered.length > pageSize && (
+              {/* 视图切换按钮 */}
+              {selected && (
+                <div className="ml-2 flex items-center rounded-md border border-border/60 bg-muted/30 p-0.5">
+                  <button
+                    onClick={() => onViewModeChange("flat")}
+                    className={cn(
+                      "flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                      viewMode === "flat"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title="递归平铺"
+                  >
+                    <LayoutGrid className="h-3 w-3" />
+                  </button>
+                  <button
+                    onClick={() => onViewModeChange("grouped")}
+                    className={cn(
+                      "flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors",
+                      viewMode === "grouped"
+                        ? "bg-background text-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    title="分组视图"
+                  >
+                    <LayoutList className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+              {viewMode === "flat" && pageSize !== Infinity && filtered.length > pageSize && (
                 <span className="text-[11px] text-muted-foreground/70">
                   · 第 {(page - 1) * pageSize + 1}-
                   {Math.min(page * pageSize, filtered.length)} 条
@@ -900,137 +1023,171 @@ export default function Dashboard({
                   {t("dash.dragHint")}
                 </span>
               )}
-              <PageSizePicker value={pageSize} onChange={onChangePageSize} />
-              {pageSize !== Infinity && pageCount > 1 && (
-                <Pager page={page} pageCount={pageCount} onChange={setPage} />
+              {viewMode === "flat" && (
+                <>
+                  <PageSizePicker value={pageSize} onChange={onChangePageSize} />
+                  {pageSize !== Infinity && pageCount > 1 && (
+                    <Pager page={page} pageCount={pageCount} onChange={setPage} />
+                  )}
+                </>
               )}
             </div>
           </div>
         )}
 
-        <div
-          className={cn(
-            "grid gap-3",
-            settings.cardDensity === "compact"
-              ? "grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8"
-              : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6",
-          )}
-        >
-          {pagedItems.map((b) => (
-            <div
-              key={b.id}
-              draggable={canReorder}
-              onDragStart={(e) => onDragStart(e, b.id)}
-              onDragEnd={() => {
-                document.body.style.cursor = "";
-                setDragId(null);
-                setOverId(null);
-              }}
-              onDragOver={(e) => onDragOver(e, b.id)}
-              onDrop={(e) => onDrop(e, b.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setCtxMenu({
-                  id: b.id,
-                  url: b.url,
-                  title: b.title,
-                  x: e.clientX,
-                  y: e.clientY,
-                });
-              }}
-              className={cn(
-                "group relative flex flex-col items-center gap-2 rounded-2xl border border-border/60 bg-card p-3 text-center shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-all duration-200 ease-out",
-                "hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_8px_24px_-12px_hsl(var(--primary)/0.25)] hover:ring-1 hover:ring-primary/20",
-                canReorder && "cursor-grab",
-                dragId === b.id && "cursor-grabbing opacity-50",
-                overId === b.id && dragId !== b.id && "ring-2 ring-primary/60",
-              )}
-              title={b.url}
-            >
-              <a
-                href={b.url}
-                target="_blank"
-                rel="noreferrer"
-                className={cn(
-                  "flex w-full flex-col items-center gap-2",
-                  canReorder && "cursor-inherit",
-                )}
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 ring-1 ring-inset ring-black/5 transition-all duration-200 group-hover:ring-primary/30 group-hover:shadow-sm dark:from-slate-800 dark:to-slate-900 dark:ring-white/5">
-                  <img
-                    src={faviconOf(b.url)}
-                    alt=""
-                    className="h-5 w-5"
-                    onError={(e) =>
-                      (e.currentTarget.style.visibility = "hidden")
-                    }
-                  />
-                </div>
-                <div className="w-full truncate text-sm font-medium">
-                  {b.title}
-                </div>
-                <div className="w-full truncate text-[11px] text-muted-foreground">
-                  {hostnameOf(b.url)}
-                </div>
-              </a>
-              <ExternalLink className="absolute right-2 top-2 h-3 w-3 text-muted-foreground opacity-0 transition group-hover:opacity-70" />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setCtxMenu({
-                    id: b.id,
-                    url: b.url,
-                    title: b.title,
-                    x: e.clientX,
-                    y: e.clientY,
-                  });
-                }}
-                className="absolute bottom-2 right-2 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent group-hover:opacity-100"
-                aria-label="more"
-              >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </button>
-              {canReorder && (
-                <GripVertical className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-60" />
-              )}
-            </div>
-          ))}
-          {!filtered.length && !subFolders.length && (
-            <div className="col-span-full rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-              {t("dash.empty")}
-            </div>
-          )}
-        </div>
+        {/* 平铺视图 */}
+        {viewMode === "flat" && (
+          <div className={gridClassName}>
+            {pagedItems.map((b) => (
+              <BookmarkCard
+                key={b.id}
+                b={b}
+                canReorder={canReorder}
+                dragId={dragId}
+                overId={overId}
+                faviconKeys={faviconKeys}
+                onDragStart={onDragStart}
+                onDragEnd={handleDragEnd}
+                onDragOver={onDragOver}
+                onDrop={onDrop}
+                onContextMenu={handleBookmarkContextMenu}
+              />
+            ))}
+            {!filtered.length && !subFolders.length && (
+              <div className="col-span-full rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+                {t("dash.empty")}
+              </div>
+            )}
+          </div>
+        )}
 
-        {pageSize !== Infinity &&
-          pageCount > 1 &&
-          filtered.length > 0 && (
-            <div className="flex items-center justify-center gap-3 pt-2">
-              <Pager page={page} pageCount={pageCount} onChange={setPage} />
-              <span className="text-[11px] text-muted-foreground">
-                共 {filtered.length} 条
-              </span>
-            </div>
-          )}
+        {viewMode === "flat" && pageSize !== Infinity && pageCount > 1 && filtered.length > 0 && (
+          <div className="flex items-center justify-center gap-3 pt-2">
+            <Pager page={page} pageCount={pageCount} onChange={setPage} />
+            <span className="text-[11px] text-muted-foreground">
+              共 {filtered.length} 条
+            </span>
+          </div>
+        )}
+
+        {/* 分组视图 */}
+        {viewMode === "grouped" && (
+          <div className="space-y-5 pt-2">
+            {/* 直接子项 */}
+            {groupedData.directItems.length > 0 && (
+              <div className={gridClassName}>
+                  {groupedData.directItems.map((b) => (
+                    <BookmarkCard
+                      key={b.id}
+                      b={b}
+                      canReorder={canReorder}
+                      dragId={dragId}
+                      overId={overId}
+                      faviconKeys={faviconKeys}
+                      onDragStart={onDragStart}
+                      onDragEnd={handleDragEnd}
+                      onDragOver={onDragOver}
+                      onDrop={onDrop}
+                      onContextMenu={handleBookmarkContextMenu}
+                    />
+                  ))}
+              </div>
+            )}
+
+            {/* 子文件夹区块 */}
+            {groupedData.sections.map((section) => {
+              const isCollapsed = collapsedSections.has(section.id);
+              return (
+                <div key={section.id} className="rounded-xl border border-border/40 bg-muted/20">
+                  <button
+                    onClick={() => {
+                      setCollapsedSections((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(section.id)) {
+                          next.delete(section.id);
+                        } else {
+                          next.add(section.id);
+                        }
+                        return next;
+                      });
+                    }}
+                    className="flex w-full items-center gap-2 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                  >
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 text-muted-foreground transition-transform duration-200",
+                        isCollapsed && "-rotate-90",
+                      )}
+                    />
+                    <Folder className="h-4 w-4 text-primary/70" />
+                    <span className="text-sm font-medium">{section.title}</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {query.trim()
+                        ? `${section.items.length} 项`
+                        : `${section.count} 项`}
+                    </span>
+                  </button>
+                  {!isCollapsed && (
+                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                      {section.items.map((b) => (
+                        <BookmarkCard
+                          key={b.id}
+                          b={b}
+                          canReorder={false}
+                          dragId={null}
+                          overId={null}
+                          faviconKeys={faviconKeys}
+                          onDragStart={() => {}}
+                          onDragEnd={() => {}}
+                          onDragOver={() => {}}
+                          onDrop={() => {}}
+                          onContextMenu={handleBookmarkContextMenu}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {groupedData.directItems.length === 0 && groupedData.sections.length === 0 && (
+              <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+                {t("dash.empty")}
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
-      {ctxMenu && (
-        <BookmarkCtxMenu
-          {...ctxMenu}
-          onCopy={async () => {
-            await navigator.clipboard.writeText(ctxMenu.url);
-            toast(t("common.copied"), "success");
-            setCtxMenu(null);
-          }}
-          onQr={() => {
-            setQrUrl(ctxMenu.url);
-            setCtxMenu(null);
-          }}
-          onClose={() => setCtxMenu(null)}
-        />
-      )}
+      {ctxMenu &&
+        createPortal(
+          <BookmarkCtxMenu
+            {...ctxMenu}
+            onCopy={async () => {
+              await navigator.clipboard.writeText(ctxMenu.url);
+              toast(t("common.copied"), "success");
+              setCtxMenu(null);
+            }}
+            onQr={() => {
+              setQrUrl(ctxMenu.url);
+              setCtxMenu(null);
+            }}
+            onRefreshIcon={async () => {
+              await refreshFavicon(ctxMenu.url);
+              setFaviconKeys((prev) => ({
+                ...prev,
+                [ctxMenu.url]: (prev[ctxMenu.url] ?? 0) + 1,
+              }));
+              setCtxMenu(null);
+            }}
+            onDelete={() => {
+              if (!confirm(`确定删除书签「${ctxMenu.title}」？`)) return;
+              removeBookmark(ctxMenu.id);
+              setCtxMenu(null);
+            }}
+          />,
+          document.body,
+        )}
 
       {qrUrl && <QrDialog url={qrUrl} onClose={() => setQrUrl(null)} />}
     </div>
@@ -1161,6 +1318,91 @@ function buildPageRange(
   if (right < total - 1) out.push("ellipsis-r");
   out.push(total);
   return out;
+}
+
+// 书签卡片组件
+function BookmarkCard({
+  b,
+  canReorder,
+  dragId,
+  overId,
+  faviconKeys,
+  onDragStart,
+  onDragEnd,
+  onDragOver,
+  onDrop,
+  onContextMenu,
+}: {
+  b: FolderBookmark;
+  canReorder: boolean;
+  dragId: string | null;
+  overId: string | null;
+  faviconKeys: Record<string, number>;
+  onDragStart: (e: React.DragEvent, id: string) => void;
+  onDragEnd: () => void;
+  onDragOver: (e: React.DragEvent, id: string) => void;
+  onDrop: (e: React.DragEvent, id: string) => void;
+  onContextMenu: (e: React.MouseEvent, url: string, title: string, id: string) => void;
+}) {
+  return (
+    <div
+      draggable={canReorder}
+      onDragStart={(e) => onDragStart(e, b.id)}
+      onDragEnd={onDragEnd}
+      onDragOver={(e) => onDragOver(e, b.id)}
+      onDrop={(e) => onDrop(e, b.id)}
+      onContextMenu={(e) => onContextMenu(e, b.url, b.title, b.id)}
+      className={cn(
+        "group relative flex items-center gap-3 rounded-2xl border border-border/60 bg-card p-3 shadow-[0_1px_0_rgba(0,0,0,0.02)] transition-all duration-200 ease-out",
+        "hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-[0_8px_24px_-12px_hsl(var(--primary)/0.25)] hover:ring-1 hover:ring-primary/20",
+        canReorder && "cursor-grab",
+        dragId === b.id && "cursor-grabbing opacity-50",
+        overId === b.id && dragId !== b.id && "ring-2 ring-primary/60",
+      )}
+      title={b.url}
+    >
+      <a
+        href={b.url}
+        className={cn(
+          "flex w-full items-center gap-3",
+          canReorder && "cursor-inherit",
+        )}
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-slate-50 to-slate-100 ring-1 ring-inset ring-black/5 transition-all duration-200 group-hover:ring-primary/30 group-hover:shadow-sm dark:from-slate-800 dark:to-slate-900 dark:ring-white/5">
+          <FaviconImg
+            url={b.url}
+            size={32}
+            className="h-5 w-5"
+            refreshKey={faviconKeys[b.url] ?? 0}
+          />
+        </div>
+        <div className="flex min-w-0 flex-col justify-center gap-0.5">
+          <div className="truncate text-sm font-medium">
+            {b.title}
+          </div>
+          <div className="truncate text-[11px] text-muted-foreground">
+            {hostnameOf(b.url)}
+          </div>
+        </div>
+      </a>
+      <ExternalLink className="absolute right-2 top-2 h-3 w-3 text-muted-foreground opacity-0 transition group-hover:opacity-70" />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onContextMenu(e, b.url, b.title, b.id);
+        }}
+        className="absolute bottom-2 right-2 rounded p-1 text-muted-foreground opacity-0 hover:bg-accent group-hover:opacity-100"
+        aria-label="more"
+      >
+        <MoreHorizontal className="h-3.5 w-3.5" />
+      </button>
+      {canReorder && (
+        <GripVertical className="pointer-events-none absolute left-2 top-2 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-60" />
+      )}
+    </div>
+  );
 }
 
 function Pager({
@@ -1297,6 +1539,8 @@ function BookmarkCtxMenu({
   y,
   onCopy,
   onQr,
+  onRefreshIcon,
+  onDelete,
 }: {
   id: string;
   url: string;
@@ -1305,7 +1549,8 @@ function BookmarkCtxMenu({
   y: number;
   onCopy: () => void;
   onQr: () => void;
-  onClose: () => void;
+  onRefreshIcon: () => void;
+  onDelete: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
@@ -1336,6 +1581,19 @@ function BookmarkCtxMenu({
         onClick={onQr}
       >
         生成二维码
+      </button>
+      <button
+        className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left hover:bg-accent"
+        onClick={onRefreshIcon}
+      >
+        重新获取 icon
+      </button>
+      <div className="my-1 h-px bg-border" />
+      <button
+        className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-destructive hover:bg-destructive/10"
+        onClick={onDelete}
+      >
+        删除书签
       </button>
     </div>
   );
