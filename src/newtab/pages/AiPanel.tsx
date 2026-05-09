@@ -404,7 +404,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
           setMessages((prev) => {
             const copy = [...prev];
             const last = copy[copy.length - 1];
-            copy[copy.length - 1] = { role: "assistant", content: acc, at: last?.at ?? now };
+            copy[copy.length - 1] = { ...last, content: acc };
             return copy;
           });
           scrollToBottom();
@@ -582,7 +582,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
           setMessages((prev) => {
             const copy = [...prev];
             const last = copy[copy.length - 1];
-            copy[copy.length - 1] = { role: "assistant", content: acc, at: last?.at ?? now };
+            copy[copy.length - 1] = { ...last, content: acc };
             return copy;
           });
           scrollToBottom();
@@ -972,7 +972,7 @@ function ThinkingBlock({ content, expanded }: { content: string; expanded?: bool
       </button>
       {open && (
         <div
-          className="border-t border-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+          className="max-h-48 overflow-auto border-t border-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground"
           style={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}
         >
           {content}
