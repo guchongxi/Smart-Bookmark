@@ -1,6 +1,6 @@
 # Smart Bookmark
 
-> 书签清理 + 新标签页看板 + AI 搜索 + 对比搜索 + 悬浮球 + 二维码 + 备份，一站式 Chrome / Edge 浏览器扩展。  
+> 书签清理 + 新标签页看板 + AI 搜索 + 对比搜索 + 二维码 + 备份，一站式 Chrome / Edge 浏览器扩展。
 > 致敬 [LazyCat Bookmark Cleaner](https://github.com/Alanrk/LazyCat-Bookmark-Cleaner) 和 [TabMark](https://github.com/Alanrk/TabMark-Bookmark-New-Tab)。
 
 ## ✨ 功能
@@ -33,14 +33,8 @@
 - 从 JSON / Netscape HTML 导入到指定文件夹
 - 导入仅新增，重复 URL 自动跳过，不会覆盖
 
-### 🎈 网页内悬浮球（0.2 新增）
-- 任意网页右下角悬浮按钮，可拖动调整位置（位置会持久化）
-- 点击展开迷你面板：书签即时搜索、打开侧边栏、打开清理中心、复制当前 URL、生成二维码
-- Shadow DOM 隔离样式，不会污染页面
-- 一键关闭 / 设置页开关 / `Alt+Shift+F` 快捷键切换
-
 ### 🔳 二维码（0.2 新增）
-- 卡片菜单、悬浮球、右键菜单均可生成二维码
+- 卡片菜单、右键菜单均可生成二维码
 - 支持浅色 / 深色自动适配
 - 一键下载 PNG / 复制 URL
 
@@ -52,18 +46,12 @@
 - 支持 OpenAI、Anthropic，API Key 只存本地
 - 流式输出，支持停止
 
-### 📌 侧边栏
-- 任意网页按 **Alt+B** / **⌘+B** 打开
-- 实时响应书签变更，搜索即时过滤
-
 ### 🖱️ 右键菜单 + 快捷键
 - 选中文字 → 在 Smart Bookmark 中搜索
 - 当前页面 → 复制 URL / 生成二维码
 - 任意链接 → 复制链接 / 生成二维码
-- 扩展图标右键 → 打开清理中心 / 侧边栏 / 切换悬浮球
+- 扩展图标右键 → 打开清理中心
 - `Alt+Shift+C` → 一键打开清理中心
-- `Alt+B` / `⌘+B` → 侧边栏
-- `Alt+Shift+F` → 切换网页悬浮球
 
 ## 🛠️ 开发
 
@@ -109,9 +97,7 @@ smart-bookmark/
 │   └── zip.mjs              # 打包 dist.zip
 ├── src/
 │   ├── background/          # Service Worker（上下文菜单、快捷键、消息代理）
-│   ├── content/             # 网页内悬浮球（Shadow DOM）
 │   ├── newtab/              # 新标签页（看板 / 清理 / 对比 / AI / 备份 / 设置）
-│   ├── sidepanel/           # 侧边栏
 │   ├── popup/               # 工具栏弹窗
 │   ├── components/ui/       # shadcn/ui 组件 + toast
 │   ├── lib/                 # bookmarks / cleaner / ai / storage / theme
@@ -127,7 +113,6 @@ smart-bookmark/
 - [x] 拖拽排序 / 文件夹内自定义顺序
 - [x] 生成二维码 / 复制 URL 上下文菜单（网页内）
 - [x] 对比搜索（多搜索引擎并排对比）
-- [x] 悬浮球
 - [x] 备份 / 导出 JSON / HTML
 - [x] 英文 i18n
 
@@ -144,7 +129,6 @@ smart-bookmark/
 - 书签数据 100% 本地处理
 - AI API Key 仅保存在 `chrome.storage.local`
 - 失效链接检测会向对应域名发起 HEAD/GET 请求，可在扫描时选择关闭
-- 悬浮球只在你开启时才会注入；注入时不发任何请求，搜索走本地书签
 - 完整隐私政策：[PRIVACY.md](./PRIVACY.md) · [在线版](https://xiaoniuge36.github.io/Smart-Bookmark/privacy.html)
 
 ## 🏪 商店上架

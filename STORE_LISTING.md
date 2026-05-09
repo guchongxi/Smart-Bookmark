@@ -146,9 +146,8 @@ Smart Bookmark combines a bookmark cleaner with a bookmark-powered new-tab dashb
 |---|---|---|
 | `bookmarks` | 读取与整理用户书签，为清理、画像、搜索等核心功能提供数据。 | Read and organize user bookmarks for core features: clean, profile, and search. |
 | `storage` | 将用户界面偏好（主题、壁纸、搜索引擎、密度）以及用户自行填入的 AI API Key 保存在 `chrome.storage.local`。仅本机，不上传。 | Persist UI preferences (theme, wallpaper, engine, density) and the user-provided AI API key in `chrome.storage.local`. Local-only, never uploaded. |
-| `contextMenus` | 注册右键菜单："在 Smart Bookmark 中搜索选中文字"、扩展图标上的清理/侧边栏入口。 | Register right-click actions like "Search bookmarks for selection" and quick access to cleaner / side panel from the action icon. |
-| `sidePanel` | 通过快捷键 Alt+B / ⌘+B 打开 Smart Bookmark 侧边栏，方便在任意网页快速访问书签。 | Open the Smart Bookmark side panel via Alt+B / ⌘+B from any page for instant bookmark access. |
-| `history` | 在新标签页和侧边栏中，对浏览历史与书签进行统一的关键词搜索。 | Provide unified keyword search across bookmarks and browsing history in new tab / side panel. |
+| `contextMenus` | 注册右键菜单："在 Smart Bookmark 中搜索选中文字"、扩展图标上的清理入口。 | Register right-click actions like "Search bookmarks for selection" and quick access to cleaner from the action icon. |
+| `history` | 在新标签页中，对浏览历史与书签进行统一的关键词搜索。 | Provide unified keyword search across bookmarks and browsing history in new tab. |
 | `topSites` | 在新标签页展示"常用站点"快捷入口，数据来自浏览器本地，仅内存读取。 | Display a "Most Visited" shortcut row on the new tab, read in-memory from the browser's local list. |
 | `tabs` | 当用户从弹窗或右键菜单触发动作时，打开新标签页（例如打开清理中心、AI 面板）。 | Open new tabs when the user triggers actions from the popup or context menu (e.g., open the cleaner or AI panel). |
 | `scripting` | 当用户启用"网页悬浮球"功能时，注入一个可交互的悬浮 UI 到页面右上角。可在设置中随时关闭。 | Inject the optional floating widget to the top-right of pages when the user enables it in Settings. Toggleable. |

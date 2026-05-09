@@ -1,37 +1,24 @@
 import {
   Bookmark,
   Wand2,
-  PanelRight,
   Sparkles,
   Columns,
   HardDriveDownload,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
 
-export default function Popup() {
-  const t = useT();
-  const openNewtab = (hash = "") =>
-    chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html" + hash) });
-
-  const openSidePanel = async () => {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.windowId) {
-      await chrome.sidePanel?.open?.({ windowId: tab.windowId }).catch(() => {});
-      window.close();
-    }
-  };
-
-  const Item = ({
-    icon,
-    label,
-    onClick,
-    color,
-  }: {
-    icon: React.ReactNode;
-    label: string;
-    onClick: () => void;
-    color: string;
-  }) => (
+function Item({
+  icon,
+  label,
+  onClick,
+  color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  color: string;
+}) {
+  return (
     <button
       onClick={onClick}
       className="group flex items-center gap-3 rounded-xl px-3 py-2 text-left transition hover:bg-accent"
@@ -44,6 +31,12 @@ export default function Popup() {
       <span className="text-sm">{label}</span>
     </button>
   );
+}
+
+export default function Popup() {
+  const t = useT();
+  const openNewtab = (hash = "") =>
+    chrome.tabs.create({ url: chrome.runtime.getURL("newtab.html" + hash) });
 
   return (
     <div className="w-[280px] bg-background p-3 text-foreground">
@@ -84,15 +77,6 @@ export default function Popup() {
           label={t("popup.backup")}
           onClick={() => openNewtab("#tab=backup")}
         />
-        <Item
-          icon={<PanelRight className="h-4 w-4" />}
-          color="from-blue-500 to-indigo-500"
-          label={t("popup.sidepanel")}
-          onClick={openSidePanel}
-        />
-      </div>
-      <div className="mt-3 rounded-md bg-muted px-3 py-2 text-[11px] text-muted-foreground">
-        {t("popup.shortcut")}
       </div>
     </div>
   );

@@ -52,7 +52,7 @@ async function main() {
     console.warn("[postbuild] no _locales folder, skipping");
   }
 
-  for (const page of ["newtab", "sidepanel", "popup"]) {
+  for (const page of ["newtab", "popup"]) {
     await moveHtmlToRoot(page);
   }
 

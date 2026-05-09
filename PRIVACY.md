@@ -31,7 +31,6 @@ Smart Bookmark 是一个**本地优先**（local-first）的浏览器扩展，�
 | `bookmarks` | 读取/整理/删除书签 | 核心功能：清理、画像、搜索 |
 | `storage` | 保存用户设置与 API Key | 仅 `chrome.storage.local` |
 | `contextMenus` | 注册右键菜单 | 选中文字搜索书签、扩展图标右键操作 |
-| `sidePanel` | 打开侧边栏 | `Alt+B` 快捷键显示书签面板 |
 | `history` | 搜索历史记录 | 与书签统一搜索 |
 | `topSites` | 读取常用网站 | 新标签页展示常用入口 |
 | `tabs` | 打开新标签页 | 从 Popup / 右键菜单新开页面 |
@@ -87,7 +86,6 @@ Smart Bookmark is a **local-first** browser extension. **No servers are operated
 | `bookmarks` | Read / organize / delete bookmarks | Core functionality |
 | `storage` | Persist user settings and API key | `chrome.storage.local` only |
 | `contextMenus` | Register right-click actions | e.g., "Search bookmarks for selection" |
-| `sidePanel` | Open the side panel | `Alt+B` / `Cmd+B` |
 | `history` | Search history records | Unified search with bookmarks |
 | `topSites` | Show most-visited sites | Quick-launch on new tab |
 | `tabs` | Open new tabs | From popup / context menu |
