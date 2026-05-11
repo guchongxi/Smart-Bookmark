@@ -1,6 +1,6 @@
 export {};
 
-import { callMcpTool, MCP_ENDPOINTS } from "@/lib/mcpClient";
+import { fetchWebPage, searchWeb } from "@/lib/webTools";
 import { getSettings } from "@/lib/storage";
 
 const MENU_IDS = {
@@ -181,43 +181,25 @@ async function executeBookmarkTool(
   }
 }
 
-/** 执行 MCP 工具 */
+/** 执行 Web 工具（本地实现，不依赖远程 MCP 服务） */
 async function executeMcpTool(
   tool: string,
   args: Record<string, unknown>,
 ): Promise<{ success: boolean; message: string; data?: unknown }> {
-  const settings = await getSettings();
-  const apiKey = settings.mcpApiKey || settings.aiApiKey;
-  if (!apiKey) {
-    return { success: false, message: "未配置 API Key，请在设置中填写" };
+  const s = await getSettings();
+  if (tool === "web_reader") {
+    if (s.mcpWebReader === false) return { success: false, message: "Web Reader 已关闭" };
+    const url = args.url as string;
+    if (!url) return { success: false, message: "缺少 url 参数" };
+    return await fetchWebPage(url);
   }
-
-  // console.log(`[SB-MCP] 执行 ${tool}`, { args, keyPrefix: apiKey.slice(0, 8) + "...", webReader: settings.mcpWebReader, webSearch: settings.mcpWebSearch });
-
-  try {
-    let result: { success: boolean; message: string; data?: unknown };
-    switch (tool) {
-      case "web_reader":
-        if (!settings.mcpWebReader) {
-          return { success: false, message: "网页读取功能未启用" };
-        }
-        result = await callMcpTool(MCP_ENDPOINTS.webReader, apiKey, "webReader", args);
-        break;
-      case "web_search":
-        if (!settings.mcpWebSearch) {
-          return { success: false, message: "网络搜索功能未启用" };
-        }
-        result = await callMcpTool(MCP_ENDPOINTS.webSearch, apiKey, "webSearchPrime", args);
-        break;
-      default:
-        return { success: false, message: `未知 MCP 工具: ${tool}` };
-    }
-    console.log(`[SB-MCP] ${tool} 结果:`, result.success ? "成功" : result.message);
-    return result;
-  } catch (err) {
-    console.error(`[SB-MCP] ${tool} 异常:`, err);
-    return { success: false, message: `MCP 执行异常: ${(err as Error).message}` };
+  if (tool === "web_search") {
+    if (s.mcpWebSearch === false) return { success: false, message: "Web Search 已关闭" };
+    const query = args.search_query as string;
+    if (!query) return { success: false, message: "缺少 search_query 参数" };
+    return await searchWeb(query);
   }
+  return { success: false, message: `未知工具: ${tool}` };
 }
 
 function collectFolders(
@@ -458,20 +440,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           sendResponse({ ok: true, result });
         } catch (err) {
           sendResponse({ ok: false, error: (err as Error).message });
-        }
-        return;
-      }
-      if (msg?.type === "test-mcp" && typeof msg.apiKey === "string") {
-        try {
-          const result = await callMcpTool(
-            MCP_ENDPOINTS.webSearch,
-            msg.apiKey,
-            "web_search_prime",
-            { search_query: "test" },
-          );
-          sendResponse({ ok: true, result });
-        } catch (err) {
-          sendResponse({ ok: true, result: { ok: false, message: (err as Error).message } });
         }
         return;
       }

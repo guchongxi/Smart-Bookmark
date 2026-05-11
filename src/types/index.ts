@@ -100,12 +100,10 @@ export interface Settings {
   aiModel: string;
   aiApiKey: string;
   aiBaseUrl: string;
-  /** MCP 网页阅读工具开关 */
+  /** 网页阅读工具开关 */
   mcpWebReader?: boolean;
-  /** MCP 网页搜索工具开关 */
+  /** 网页搜索工具开关 */
   mcpWebSearch?: boolean;
-  /** MCP 专用 API Key（空 = 复用 aiApiKey） */
-  mcpApiKey?: string;
   /** 是否启用 AI 思考内容展示 */
   showThinking?: boolean;
   cardDensity: "comfy" | "compact";

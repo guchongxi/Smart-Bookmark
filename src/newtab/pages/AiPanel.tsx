@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { chat } from "@/lib/ai";
-import { BOOKMARK_TOOLS_OPENAI, CONFIRM_REQUIRED_TOOLS, MCP_TOOL_NAMES, type BookmarkToolResult } from "@/lib/aiTools";
+import { BOOKMARK_TOOLS_OPENAI, CONFIRM_REQUIRED_TOOLS, type BookmarkToolResult } from "@/lib/aiTools";
 import { getBookmarkContextForAi } from "@/lib/aiBookmarkContext";
 import { renderMarkdown } from "@/lib/markdown";
 import {
@@ -516,10 +516,10 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     }
   };
 
-  /** 通过 background 执行工具（书签工具或 MCP 工具） */
+  /** 通过 background 执行工具（书签工具或 Web 工具） */
   const executeTool = async (toolName: string, args: Record<string, unknown>) => {
-    // MCP 工具走独立消息类型
-    if (MCP_TOOL_NAMES.has(toolName)) {
+    // Web 工具走独立消息类型
+    if (toolName === "web_reader" || toolName === "web_search") {
       return new Promise<{ ok: boolean; result?: { success: boolean; message: string; data?: unknown }; error?: string }>((resolve) => {
         chrome.runtime.sendMessage(
           { type: "execute-mcp-tool", tool: toolName, args },

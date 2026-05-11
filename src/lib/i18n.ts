@@ -256,15 +256,11 @@ const zh: Dict = {
   "settings.compareEngines": "对比搜索引擎",
 
   "settings.mcp": "AI 扩展能力",
-  "settings.mcpHint": "启用后 AI 可主动读取网页内容和搜索网络信息。需要智谱 API Key。",
+  "settings.mcpHint": "启用后 AI 可主动读取网页内容和搜索网络信息。",
   "settings.mcpWebReader": "网页读取",
   "settings.mcpWebReaderHint": "AI 可抓取指定 URL 的网页正文内容",
   "settings.mcpWebSearch": "网络搜索",
   "settings.mcpWebSearchHint": "AI 可搜索互联网获取最新信息",
-  "settings.mcpApiKey": "MCP API Key",
-  "settings.mcpApiKeyPh": "留空则使用主 AI Key",
-  "settings.mcpTest": "连通性",
-  "settings.mcpTestBtn": "测试 MCP",
 
   "qr.title": "二维码",
   "qr.scan": "扫码访问",
@@ -535,15 +531,11 @@ const en: Dict = {
   "settings.bookmarkSummaryCacheClear": "Clear summary cache",
 
   "settings.mcp": "AI Extensions",
-  "settings.mcpHint": "Enable AI to read web pages and search the internet. Requires a Zhipu API key.",
+  "settings.mcpHint": "Enable AI to read web pages and search the internet.",
   "settings.mcpWebReader": "Web Reader",
   "settings.mcpWebReaderHint": "AI can fetch and read web page content from URLs",
   "settings.mcpWebSearch": "Web Search",
   "settings.mcpWebSearchHint": "AI can search the internet for up-to-date information",
-  "settings.mcpApiKey": "MCP API Key",
-  "settings.mcpApiKeyPh": "Leave empty to use main AI key",
-  "settings.mcpTest": "Connectivity",
-  "settings.mcpTestBtn": "Test MCP",
 
   "qr.title": "QR code",
   "qr.scan": "Scan to visit",

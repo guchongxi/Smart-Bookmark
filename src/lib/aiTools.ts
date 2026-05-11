@@ -243,6 +243,3 @@ export const BOOKMARK_TOOLS_ANTHROPIC = BOOKMARK_TOOLS_OPENAI.map((t) => ({
 
 /** 需要用户确认的工具名集合 */
 export const CONFIRM_REQUIRED_TOOLS = new Set(["delete_bookmark", "move_bookmark"]);
-
-/** MCP 工具名集合 */
-export const MCP_TOOL_NAMES = new Set(["web_reader", "web_search"]);
