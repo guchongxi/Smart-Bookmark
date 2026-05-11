@@ -540,9 +540,10 @@ export default function Dashboard({
 
   const closeCtx = useCallback(() => setCtxMenu(null), []);
 
+  // xl 时主区宽（两栏布局），2xl 时主区窄（三栏布局，右侧多了 widget sidebar）
   const gridClassName = settings.cardDensity === "compact"
-    ? "grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8"
-    : "grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6";
+    ? "grid gap-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 xl:grid-cols-8 2xl:grid-cols-6"
+    : "grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5";
 
   const handleDragEnd = useCallback(() => {
     document.body.style.cursor = "";
@@ -1331,7 +1332,7 @@ export default function Dashboard({
                     </span>
                   </button>
                   {!isCollapsed && (
-                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5">
                       {section.items.map((b) => (
                         <BookmarkCard
                           key={b.id}
