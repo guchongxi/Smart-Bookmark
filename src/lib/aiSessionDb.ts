@@ -87,6 +87,7 @@ export async function updateSession(
   id: string,
   messages: AiSession["messages"],
   title?: string,
+  systemPrompt?: string,
 ): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(STORE_NAME, "readwrite");
@@ -102,6 +103,7 @@ export async function updateSession(
     messages,
     updatedAt: Date.now(),
     ...(title != null ? { title: title.slice(0, 30) } : {}),
+    ...(systemPrompt != null ? { systemPrompt } : {}),
   };
   store.put(updated);
 }

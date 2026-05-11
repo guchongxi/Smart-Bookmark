@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { chat } from "@/lib/ai";
-import { BOOKMARK_TOOLS_OPENAI, BOOKMARK_TOOLS_ANTHROPIC, CONFIRM_REQUIRED_TOOLS } from "@/lib/aiTools";
+import { BOOKMARK_TOOLS_OPENAI, BOOKMARK_TOOLS_ANTHROPIC, CONFIRM_REQUIRED_TOOLS, MCP_TOOL_NAMES, type BookmarkToolResult } from "@/lib/aiTools";
 import { getBookmarkContextForAi } from "@/lib/aiBookmarkContext";
 import { renderMarkdown } from "@/lib/markdown";
 import {
@@ -23,10 +23,21 @@ import {
   Trash2,
   PanelLeftClose,
   PanelLeftOpen,
+  User,
+  Brain,
+  X,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { fetchTrending, trendingToMarkdown } from "@/lib/github";
 import { toast } from "@/components/ui/toast";
+import {
+  getProfile,
+  setProfile,
+  getMemory,
+  setMemory,
+  addProfileEntries,
+  addMemoryEntries,
+} from "@/lib/aiUserDb";
 
 const SYSTEM_PROMPT = [
   "You are Smart Bookmark Agent — an AI agent that works on top of the user's local Chrome bookmarks.",
@@ -38,6 +49,22 @@ const SYSTEM_PROMPT = [
   "- Help craft search queries to find things they already saved.",
   "A snapshot of the user's bookmarks (counts, folder breakdown, sample titles + URLs) is appended below under '---'. Prefer grounding your answers in it. If the user asks something unrelated to their bookmarks, answer briefly and steer back to what you can do for their collection.",
   "Style: concise, use bullet points, reply in the user's language (Chinese ↔ English). Never fabricate bookmarks that don't appear in the snapshot.",
+  "",
+  "## 记忆管理",
+  "你有 save_memory 工具，用于持久记住关于用户的信息。当对话中出现以下情况时调用：",
+  "- 用户明确透露身份信息（姓名、职业、角色、语言偏好）→ type: \"profile\"",
+  "- 发现用户的偏好、习惯、行为模式、工作方式 → type: \"memory\"",
+  "- 讨论中产生值得记住的结论或事实 → type: \"memory\"",
+  "规则：",
+  "- 只在有明确新信息时调用，不要为了调用而调用",
+  "- 每条信息一句话，简洁浓缩",
+  "- 如果用户明确要求你记住某事，务必调用",
+  "- 不需要每次都调用，大多数对话不需要触发",
+  "- 保存前先用 list_memory 检查是否已存在相同或相似的条目，避免重复",
+  "你还有记忆管理工具：",
+  "- list_memory：查看当前已保存的画像和记忆，保存前应先调用",
+  "- delete_memory：删除错误或过时的条目",
+  "- update_memory：修改已有条目的内容",
 ].join("\n");
 
 function formatMsgTime(
@@ -96,8 +123,18 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const pendingToolCallsRef = useRef<Map<string, { id: string; name: string; argsStr: string; _done?: boolean }>>(new Map());
   /** 始终持有最新 messages 的 ref，避免闭包陈旧 */
   const messagesRef = useRef<AiMessage[]>([]);
+  /** 保存本轮对话的书签快照，continueChat 不重新拉取 */
+  const bookmarkCtxRef = useRef<string>("");
+  /** 当前会话的系统提示词（新建时构建，后续复用） */
+  const systemPromptRef = useRef<string>("");
   /** tool-confirm 状态：当前等待用户确认的 tool call */
   const [confirmToolCall, setConfirmToolCall] = useState<{ id: string; name: string; args: Record<string, unknown> } | null>(null);
+
+  /* ── 画像/记忆面板状态 ── */
+  const [activePanel, setActivePanel] = useState<"profile" | "memory" | null>(null);
+  const [profileText, setProfileText] = useState("");
+  const [memoryEntries, setMemoryEntries] = useState<string[]>([]);
+  const [memoryInput, setMemoryInput] = useState("");
 
   /** 是否自动滚动到底部（用户上翻时暂停，发新消息时恢复） */
   const autoScrollRef = useRef(true);
@@ -133,6 +170,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         sessionIdRef.current = list[0].id;
         setSessionId(list[0].id);
         setMessages(list[0].messages);
+        systemPromptRef.current = list[0].systemPrompt ?? "";
         scrollToBottom();
       }
     });
@@ -148,6 +186,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       sessionIdRef.current = id;
       setSessionId(id);
       setMessages(s.messages);
+      systemPromptRef.current = s.systemPrompt ?? "";
       scrollToBottom();
     },
     [sessionId, sessions],
@@ -341,12 +380,57 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       setSessionId(s.id);
     }
 
-    const bookmarkCtx = await getBookmarkContextForAi();
+    let systemContent: string;
+
+    if (systemPromptRef.current) {
+      // 复用已有的系统提示词（从 session 恢复或之前构建的）
+      systemContent = systemPromptRef.current;
+    } else {
+      // 首次构建系统提示词
+      const bookmarkCtx = await getBookmarkContextForAi();
+      bookmarkCtxRef.current = bookmarkCtx;
+      const [profileEntries, memoryEntriesData] = await Promise.all([
+        getProfile(),
+        getMemory(),
+      ]);
+
+      let userContext = "";
+      if (profileEntries.length > 0) {
+        userContext += `## 用户画像\n${profileEntries.map((e) => `- ${e}`).join("\n")}`;
+      }
+      if (memoryEntriesData.length > 0) {
+        if (userContext) userContext += "\n\n";
+        userContext += `## 持久记忆\n${memoryEntriesData.map((e) => `- ${e}`).join("\n")}`;
+      }
+
+      systemContent = userContext
+        ? `${SYSTEM_PROMPT}\n\n---\n${bookmarkCtx}\n\n---\n${userContext}`
+        : `${SYSTEM_PROMPT}\n\n---\n${bookmarkCtx}`;
+
+      // 追加 MCP 能力说明
+      const mcpCapabilities: string[] = [];
+      if (settings.mcpWebReader) {
+        mcpCapabilities.push("- web_reader：抓取指定 URL 的网页内容，可用来阅读文章、获取页面信息");
+      }
+      if (settings.mcpWebSearch) {
+        mcpCapabilities.push("- web_search：搜索网络信息，可用来查找最新资讯、验证信息，参数为 search_query");
+      }
+      if (mcpCapabilities.length > 0) {
+        systemContent += "\n\n## 扩展能力\n" + mcpCapabilities.join("\n");
+      }
+
+      // 持久化系统提示词到会话
+      systemPromptRef.current = systemContent;
+      if (sessionIdRef.current) {
+        updateSession(sessionIdRef.current, [], undefined, systemContent);
+      }
+    }
+
     const convo = messages.filter((m) => m.role !== "system");
     const forApi: AiMessage[] = [
       {
         role: "system",
-        content: `${SYSTEM_PROMPT}\n\n---\n${bookmarkCtx}`,
+        content: systemContent,
       },
       ...convo,
       { role: "user", content: text },
@@ -379,7 +463,19 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       let thinkingAcc = "";
       startPersistTimer(() => acc);
 
-      const tools = settings.aiProvider === "openai" ? BOOKMARK_TOOLS_OPENAI : BOOKMARK_TOOLS_ANTHROPIC;
+      // 动态构建工具列表：根据设置包含 MCP 工具
+      const baseTools = BOOKMARK_TOOLS_OPENAI.filter((t) => {
+        if (t.function.name === "web_reader") return settings.mcpWebReader;
+        if (t.function.name === "web_search") return settings.mcpWebSearch;
+        return true;
+      });
+      const tools = settings.aiProvider === "openai"
+        ? baseTools
+        : baseTools.map((t) => ({
+            name: t.function.name,
+            description: t.function.description,
+            input_schema: t.function.parameters,
+          }));
       await chat({
         settings,
         messages: forApi,
@@ -420,8 +516,18 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     }
   };
 
-  /** 通过 background 执行书签工具 */
+  /** 通过 background 执行工具（书签工具或 MCP 工具） */
   const executeTool = async (toolName: string, args: Record<string, unknown>) => {
+    // MCP 工具走独立消息类型
+    if (MCP_TOOL_NAMES.has(toolName)) {
+      return new Promise<{ ok: boolean; result?: { success: boolean; message: string; data?: unknown }; error?: string }>((resolve) => {
+        chrome.runtime.sendMessage(
+          { type: "execute-mcp-tool", tool: toolName, args },
+          (resp) => resolve(resp),
+        );
+      });
+    }
+    // 书签工具走原有路径
     return new Promise<{ ok: boolean; result?: { success: boolean; message: string; data?: unknown }; error?: string }>((resolve) => {
       chrome.runtime.sendMessage(
         { type: "execute-bookmark-tool", tool: toolName, args },
@@ -440,6 +546,108 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     });
   };
 
+  /** 执行 save_memory 工具：直接写入 IndexedDB */
+  const executeSaveMemory = async (args: Record<string, unknown>): Promise<BookmarkToolResult> => {
+    try {
+      const type = args.type as string;
+      const entries = (args.entries as string[]) ?? [];
+
+      if (type === "profile") {
+        await addProfileEntries(entries);
+      } else if (type === "memory") {
+        await addMemoryEntries(entries);
+      } else {
+        return { success: false, message: `未知类型: ${type}` };
+      }
+
+      // 在对话流中插入通知
+      setMessages((prev) => [
+        ...prev,
+        { role: "system", content: `已记住：${entries.join("、")}` },
+      ]);
+
+      return { success: true, message: `已保存 ${entries.length} 条${type === "profile" ? "画像" : "记忆"}信息` };
+    } catch {
+      return { success: false, message: "保存失败" };
+    }
+  };
+
+  /** 执行 list_memory 工具：返回当前画像和记忆 */
+  const executeListMemory = async (): Promise<BookmarkToolResult> => {
+    try {
+      const [profile, memory] = await Promise.all([getProfile(), getMemory()]);
+      const data = { profile, memory };
+      return { success: true, message: JSON.stringify(data), data };
+    } catch {
+      return { success: false, message: "读取失败" };
+    }
+  };
+
+  /** 执行 delete_memory 工具：删除指定条目 */
+  const executeDeleteMemory = async (args: Record<string, unknown>): Promise<BookmarkToolResult> => {
+    try {
+      const type = args.type as string;
+      const entry = args.entry as string;
+
+      if (type === "profile") {
+        const entries = await getProfile();
+        const next = entries.filter((e) => e !== entry);
+        if (next.length === entries.length) return { success: false, message: `未找到条目: ${entry}` };
+        await setProfile(next);
+      } else if (type === "memory") {
+        const entries = await getMemory();
+        const next = entries.filter((e) => e !== entry);
+        if (next.length === entries.length) return { success: false, message: `未找到条目: ${entry}` };
+        await setMemory(next);
+      } else {
+        return { success: false, message: `未知类型: ${type}` };
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "system", content: `已删除：${entry}` },
+      ]);
+
+      return { success: true, message: `已删除 ${type === "profile" ? "画像" : "记忆"}条目` };
+    } catch {
+      return { success: false, message: "删除失败" };
+    }
+  };
+
+  /** 执行 update_memory 工具：修改指定条目 */
+  const executeUpdateMemory = async (args: Record<string, unknown>): Promise<BookmarkToolResult> => {
+    try {
+      const type = args.type as string;
+      const oldEntry = args.old_entry as string;
+      const newEntry = args.new_entry as string;
+
+      if (type === "profile") {
+        const entries = await getProfile();
+        const idx = entries.indexOf(oldEntry);
+        if (idx === -1) return { success: false, message: `未找到条目: ${oldEntry}` };
+        entries[idx] = newEntry;
+        await setProfile(entries);
+      } else if (type === "memory") {
+        const entries = await getMemory();
+        const idx = entries.indexOf(oldEntry);
+        if (idx === -1) return { success: false, message: `未找到条目: ${oldEntry}` };
+        entries[idx] = newEntry;
+        await setMemory(entries);
+      } else {
+        return { success: false, message: `未知类型: ${type}` };
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { role: "system", content: `已修改：${oldEntry} → ${newEntry}` },
+      ]);
+
+      return { success: true, message: `已修改${type === "profile" ? "画像" : "记忆"}条目` };
+    } catch {
+      return { success: false, message: "修改失败" };
+    }
+  };
+
   /** 处理 tool call 完成后的执行逻辑 */
   const handleToolCallDone = async (toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => {
     setLoading(false);
@@ -448,7 +656,41 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       persistTimerRef.current = null;
     }
 
-    for (const tc of toolCalls) {
+    // 拦截记忆管理工具：直接在面板执行，不经过 background
+    const MEMORY_TOOLS = new Set(["save_memory", "list_memory", "delete_memory", "update_memory"]);
+    const memoryCalls = toolCalls.filter((tc) => MEMORY_TOOLS.has(tc.name));
+    const otherCalls = toolCalls.filter((tc) => !MEMORY_TOOLS.has(tc.name));
+
+    for (const tc of memoryCalls) {
+      let result: BookmarkToolResult;
+      switch (tc.name) {
+        case "save_memory": result = await executeSaveMemory(tc.args); break;
+        case "list_memory": result = await executeListMemory(); break;
+        case "delete_memory": result = await executeDeleteMemory(tc.args); break;
+        case "update_memory": result = await executeUpdateMemory(tc.args); break;
+        default: result = { success: false, message: "未知工具" };
+      }
+      const assistantMsg: AiMessage = {
+        role: "assistant",
+        content: "",
+        toolCalls: [tc],
+      };
+      const toolResult: AiMessage = {
+        role: "tool",
+        content: JSON.stringify(result),
+        toolResult: { toolCallId: tc.id, ...result },
+      };
+      setMessages((prev) => [...prev, assistantMsg, toolResult]);
+      setMessages((prev) => { persist(prev); return prev; });
+    }
+
+    if (otherCalls.length === 0) {
+      // 全是记忆工具，直接继续对话
+      await continueChat([...messagesRef.current], bookmarkCtxRef.current);
+      return;
+    }
+
+    for (const tc of otherCalls) {
       if (CONFIRM_REQUIRED_TOOLS.has(tc.name)) {
         // 查询书签和文件夹的实际名称
         const bookmarkId = String(tc.args.bookmarkId ?? "");
@@ -470,7 +712,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       }
     }
 
-    await executeToolCalls(toolCalls);
+    await executeToolCalls(otherCalls);
   };
 
   /** 执行工具并继续对话 */
@@ -497,7 +739,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     setMessages((prev) => [...prev, ...toolResults]);
     setMessages((prev) => { persist(prev); return prev; });
 
-    await continueChat([...messagesRef.current, assistantMsg, ...toolResults]);
+    await continueChat([...messagesRef.current, assistantMsg, ...toolResults], bookmarkCtxRef.current);
   };
 
   /** 用户确认执行 */
@@ -543,16 +785,54 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     };
     setMessages((prev) => [...prev, cancelMsg]);
     setMessages((prev) => { persist(prev); return prev; });
-    continueChat([...messagesRef.current, cancelMsg]);
+    continueChat([...messagesRef.current, cancelMsg], bookmarkCtxRef.current);
+  };
+
+  /* ── 画像/记忆面板 ── */
+  const togglePanel = async (panel: "profile" | "memory") => {
+    if (activePanel === panel) {
+      setActivePanel(null);
+      return;
+    }
+    setActivePanel(panel);
+    if (panel === "profile") {
+      const entries = await getProfile();
+      setProfileText(entries.join("\n"));
+    } else {
+      const entries = await getMemory();
+      setMemoryEntries(entries);
+    }
+  };
+
+  const saveProfile = async () => {
+    const entries = profileText.split("\n").map((l) => l.trim()).filter(Boolean);
+    await setProfile(entries);
+    toast(t("ai.saved"), "success");
+  };
+
+  const addMemory = async () => {
+    const text = memoryInput.trim();
+    if (!text) return;
+    await addMemoryEntries([text]);
+    setMemoryEntries((prev) => [...prev, text]);
+    setMemoryInput("");
+  };
+
+  const removeMemory = async (index: number) => {
+    const next = memoryEntries.filter((_, i) => i !== index);
+    setMemoryEntries(next);
+    await setMemory(next);
   };
 
   /** 用 tool result 继续对话 */
-  const continueChat = async (conversationHistory: AiMessage[]) => {
-    const bookmarkCtx = await getBookmarkContextForAi();
+  const continueChat = async (conversationHistory: AiMessage[], _bookmarkCtx?: string) => {
+    // 直接复用系统提示词，不重新构建
+    const systemContent = systemPromptRef.current;
+
     const forApi: AiMessage[] = [
       {
         role: "system",
-        content: `${SYSTEM_PROMPT}\n\n---\n${bookmarkCtx}`,
+        content: systemContent,
       },
       ...conversationHistory,
     ];
@@ -767,9 +1047,92 @@ export default function AiPanel({ settings }: { settings: Settings }) {
               />
               {modelLine}
             </span>
+            <button
+              type="button"
+              onClick={() => togglePanel("profile")}
+              className={cn(
+                "rounded p-1 transition hover:bg-muted",
+                activePanel === "profile" && "bg-muted",
+              )}
+              title={t("ai.profile")}
+            >
+              <User className="h-4 w-4 text-muted-foreground" />
+            </button>
+            <button
+              type="button"
+              onClick={() => togglePanel("memory")}
+              className={cn(
+                "rounded p-1 transition hover:bg-muted",
+                activePanel === "memory" && "bg-muted",
+              )}
+              title={t("ai.memory")}
+            >
+              <Brain className="h-4 w-4 text-muted-foreground" />
+            </button>
           </div>
         </header>
         <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 pb-3">
+          {/* ── 画像/记忆编辑面板 ── */}
+          {activePanel && (
+            <div className="shrink-0 rounded-lg border p-4" style={{ borderColor: "hsl(var(--claude-rule))" }}>
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium">
+                  {activePanel === "profile" ? t("ai.profile") : t("ai.memory")}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActivePanel(null)}
+                  className="rounded p-1 transition hover:bg-muted"
+                >
+                  <X className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+              </div>
+              {activePanel === "profile" ? (
+                <div>
+                  <textarea
+                    value={profileText}
+                    onChange={(e) => setProfileText(e.target.value)}
+                    placeholder={t("ai.profileHint")}
+                    className="h-32 w-full resize-none rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+                    style={{ borderColor: "hsl(var(--claude-rule))" }}
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <Button size="sm" onClick={saveProfile}>{t("common.save")}</Button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-2 max-h-40 space-y-1 overflow-auto">
+                    {memoryEntries.length === 0 ? (
+                      <p className="text-xs text-muted-foreground">{t("ai.memoryHint")}</p>
+                    ) : (
+                      memoryEntries.map((entry, i) => (
+                        <div key={i} className="flex items-center justify-between gap-2 rounded px-2 py-1 text-sm hover:bg-muted/50">
+                          <span className="min-w-0 flex-1 truncate">{entry}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeMemory(i)}
+                            className="shrink-0 rounded p-0.5 text-muted-foreground/50 transition hover:text-destructive"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      value={memoryInput}
+                      onChange={(e) => setMemoryInput(e.target.value)}
+                      placeholder={t("ai.memoryPlaceholder")}
+                      onKeyDown={(e) => { if (e.key === "Enter") addMemory(); }}
+                    />
+                    <Button size="sm" onClick={addMemory}>{t("ai.memoryAdd")}</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div
             ref={scrollRef}
             onScroll={onScroll}
@@ -892,6 +1255,10 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                       isUser && "whitespace-pre-wrap",
                     )}
                   >
+                    {/* 自动学习结果 */}
+                    {m.learnDetail && (
+                      <LearnResultBlock detail={m.learnDetail} />
+                    )}
                     {/* 思考过程折叠块：有 thinking 无 content 时展开（思考中），有 content 后折叠 */}
                     {!isUser && m.thinking && (
                       <ThinkingBlock content={m.thinking} expanded={!m.content} />
@@ -946,12 +1313,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   );
 }
 
-function ThinkingBlock({ content, expanded }: { content: string; expanded?: boolean }) {
-  const [open, setOpen] = useState(expanded ?? false);
-  // 外部 expanded 变化时同步（思考阶段→展开，回复阶段→折叠）
-  useEffect(() => {
-    if (expanded !== undefined) setOpen(expanded);
-  }, [expanded]);
+function LearnResultBlock({ detail }: { detail: { added: { text: string; reason: string }[]; message: string } }) {
+  const [open, setOpen] = useState(false);
+  const t = useT();
   return (
     <div className="mb-2 rounded-lg border border-muted bg-muted/30">
       <button
@@ -968,10 +1332,68 @@ function ThinkingBlock({ content, expanded }: { content: string; expanded?: bool
         >
           <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
         </svg>
-        思考过程
+        {detail.added.length > 0
+          ? t("ai.learnUpdated").replace("{count}", String(detail.added.length))
+          : t("ai.learnNoUpdate")}
+      </button>
+      {open && (
+        <div className="border-t border-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+          {detail.added.length === 0 ? (
+            <p>{detail.message}</p>
+          ) : (
+            <ul className="space-y-1">
+              {detail.added.map((item, i) => (
+                <li key={i}>
+                  <span className="font-medium text-foreground/80">{item.text}</span>
+                  <span className="ml-1 text-muted-foreground/70">— {item.reason}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThinkingBlock({ content, expanded }: { content: string; expanded?: boolean }) {
+  const [open, setOpen] = useState(expanded ?? false);
+  const t = useT();
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  // 外部 expanded 变化时同步（思考阶段→展开，回复阶段→折叠）
+  useEffect(() => {
+    if (expanded !== undefined) setOpen(expanded);
+  }, [expanded]);
+
+  // 思考中（expanded=true）时自动滚到底部
+  useEffect(() => {
+    if (expanded && contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [content, expanded]);
+
+  return (
+    <div className="mb-2 rounded-lg border border-muted bg-muted/30">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition hover:bg-muted/50"
+      >
+        <svg
+          className={`h-3 w-3 shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        {t("ai.thinkingProcess")}
       </button>
       {open && (
         <div
+          ref={contentRef}
           className="max-h-48 overflow-auto border-t border-muted px-3 py-2 text-xs leading-relaxed text-muted-foreground"
           style={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}
         >

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -8,7 +8,7 @@ import type { AccentPreset, Settings, ThemePreset } from "@/types";
 import { useT } from "@/lib/i18n";
 import { testAi } from "@/lib/ai";
 import { BUILTIN_ENGINES, faviconFor } from "@/lib/engines";
-import { Check, CheckCircle2, XCircle, Loader2, Flame, ExternalLink } from "lucide-react";
+import { Check, CheckCircle2, XCircle, Loader2, Flame, ExternalLink, Globe } from "lucide-react";
 import { COMMON_LANGUAGES, clearTrendingCache } from "@/lib/github";
 import { clearAllNoIconCache } from "@/lib/favicon";
 import { clearSummaryCache } from "@/lib/bookmarkSummaryCache";
@@ -28,6 +28,12 @@ export default function SettingsPage() {
     message: string;
   } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [mcpTestResult, setMcpTestResult] = useState<{
+    ok: boolean;
+    latencyMs: number;
+    message: string;
+  } | null>(null);
+  const [mcpTesting, setMcpTesting] = useState(false);
 
   useEffect(() => {
     getSettings().then(setS);
@@ -53,6 +59,33 @@ export default function SettingsPage() {
     const r = await testAi(s);
     setTestResult(r);
     setTesting(false);
+  };
+
+  const onTestMcp = async () => {
+    if (!s) return;
+    setMcpTesting(true);
+    setMcpTestResult(null);
+    const start = performance.now();
+    try {
+      const apiKey = s.mcpApiKey || s.aiApiKey;
+      if (!apiKey) {
+        setMcpTestResult({ ok: false, latencyMs: 0, message: "未配置 API Key" });
+        setMcpTesting(false);
+        return;
+      }
+      const resp = await new Promise<{ ok: boolean; result?: { ok: boolean; message: string }; error?: string }>((resolve) => {
+        chrome.runtime.sendMessage({ type: "test-mcp", apiKey }, (r) => resolve(r));
+      });
+      const ms = Math.round(performance.now() - start);
+      if (resp?.ok && resp.result) {
+        setMcpTestResult({ ok: resp.result.ok, latencyMs: ms, message: resp.result.message });
+      } else {
+        setMcpTestResult({ ok: false, latencyMs: ms, message: resp?.error ?? "调用失败" });
+      }
+    } catch (err) {
+      setMcpTestResult({ ok: false, latencyMs: Math.round(performance.now() - start), message: String(err) });
+    }
+    setMcpTesting(false);
   };
 
   return (
@@ -429,6 +462,83 @@ export default function SettingsPage() {
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
             {t("settings.apiKeyNotice")} OpenAI 兼容接口（DeepSeek/Moonshot Kimi/LM Studio/Ollama 等）可通过自定义 Base URL 使用。
           </div>
+        </CardContent>
+      </Card>
+
+      {/* MCP 扩展能力 */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5" />
+            {t("settings.mcp")}
+          </CardTitle>
+          <CardDescription>{t("settings.mcpHint")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Row label={t("settings.mcpWebReader")}>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={s?.mcpWebReader ?? false}
+                onCheckedChange={(v) => update({ mcpWebReader: v })}
+              />
+              <span className="text-sm text-muted-foreground">{t("settings.mcpWebReaderHint")}</span>
+            </div>
+          </Row>
+          <Row label={t("settings.mcpWebSearch")}>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={s?.mcpWebSearch ?? false}
+                onCheckedChange={(v) => update({ mcpWebSearch: v })}
+              />
+              <span className="text-sm text-muted-foreground">{t("settings.mcpWebSearchHint")}</span>
+            </div>
+          </Row>
+          <Row label={t("settings.mcpApiKey")}>
+            <Input
+              type="password"
+              placeholder={t("settings.mcpApiKeyPh")}
+              value={s?.mcpApiKey ?? ""}
+              onChange={(e) => update({ mcpApiKey: e.target.value })}
+            />
+          </Row>
+          <Row label={t("settings.mcpTest")}>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onTestMcp}
+                disabled={mcpTesting || !(s?.mcpApiKey || s?.aiApiKey)}
+                className="gap-2"
+              >
+                {mcpTesting ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                )}
+                {t("settings.mcpTestBtn")}
+              </Button>
+              {mcpTestResult && (
+                <span
+                  className={
+                    "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs " +
+                    (mcpTestResult.ok
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                      : "bg-destructive/10 text-destructive")
+                  }
+                >
+                  {mcpTestResult.ok ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <XCircle className="h-3.5 w-3.5" />
+                  )}
+                  {mcpTestResult.ok ? "成功" : "失败"} · {mcpTestResult.latencyMs}ms
+                  <span className="max-w-[240px] truncate opacity-80">
+                    · {mcpTestResult.message}
+                  </span>
+                </span>
+              )}
+            </div>
+          </Row>
         </CardContent>
       </Card>
 
