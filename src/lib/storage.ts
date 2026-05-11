@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: Settings = {
   discoverDefaultLanguage: "",
   showGithubTrendingWidget: true,
   showInfoCollections: true,
+  showTopSites: true,
 };
 
 const hasChromeStorage = typeof chrome !== "undefined" && !!chrome.storage?.local;

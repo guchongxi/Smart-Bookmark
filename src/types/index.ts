@@ -119,6 +119,8 @@ export interface Settings {
   showGithubTrendingWidget?: boolean;
   /** 首页是否显示「信息差雷达」（NewsNow + 资源入口）模块 */
   showInfoCollections?: boolean;
+  /** 首页是否显示「常去」小组件 */
+  showTopSites?: boolean;
 }
 
 export type TrendingRange = "daily" | "weekly" | "monthly" | "yearly";

@@ -10,6 +10,7 @@ import { testAi } from "@/lib/ai";
 import { BUILTIN_ENGINES, faviconFor } from "@/lib/engines";
 import { Check, CheckCircle2, XCircle, Loader2, Flame, ExternalLink, Globe } from "lucide-react";
 import { COMMON_LANGUAGES, clearTrendingCache } from "@/lib/github";
+import { HOME_WIDGETS } from "@/lib/homeWidgets";
 import { clearAllNoIconCache } from "@/lib/favicon";
 import { clearSummaryCache } from "@/lib/bookmarkSummaryCache";
 import type { TrendingMode, TrendingRange, TrendingSort } from "@/types";
@@ -552,37 +553,45 @@ export default function SettingsPage() {
         <CardContent className="space-y-4">
           <Row label={t("settings.homeWidgets")}>
             <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={s.showGithubTrendingWidget ?? true}
-                  onCheckedChange={(v) =>
-                    update({ showGithubTrendingWidget: v })
-                  }
-                />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">
-                    {t("settings.showGithubTrendingWidget")}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {t("settings.showGithubTrendingWidgetHint")}
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Switch
-                  checked={s.showInfoCollections ?? true}
-                  onCheckedChange={(v) =>
-                    update({ showInfoCollections: v })
-                  }
-                />
-                <div className="min-w-0">
-                  <div className="text-sm font-medium">
-                    {t("settings.showInfoCollections")}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {t("settings.showInfoCollectionsHint")}
-                  </div>
-                </div>
+              <p className="text-[11px] text-muted-foreground">
+                {t("settings.homeWidgetsHint")}
+              </p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {HOME_WIDGETS.map((w) => {
+                  const visible = (s[w.settingKey] as boolean | undefined) ?? true;
+                  return (
+                    <div
+                      key={w.key}
+                      className={cn(
+                        "flex items-start gap-3 rounded-xl border p-3 transition",
+                        visible
+                          ? "border-primary/40 bg-primary/5"
+                          : "border-border/60 bg-muted/20",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br",
+                          w.accent,
+                        )}
+                      >
+                        <w.Icon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium">{t(w.nameKey)}</div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {t(w.descKey)}
+                        </div>
+                      </div>
+                      <Switch
+                        checked={visible}
+                        onCheckedChange={(v) =>
+                          update({ [w.settingKey]: v } as Partial<Settings>)
+                        }
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </Row>

@@ -120,6 +120,11 @@ const zh: Dict = {
   "settings.showInfoCollections": "首页显示信息差雷达",
   "settings.showInfoCollectionsHint":
     "关闭后首页不再显示 NewsNow 内嵌热点和资源入口面板。",
+  "settings.showTopSites": "常去",
+  "settings.showTopSitesHint": "首页显示浏览器常访问站点",
+  "settings.homeWidgetsHint": "控制首页各模块的显示与隐藏",
+  "home.widgetHidden": "已隐藏，去设置恢复",
+  "home.hideWidget": "隐藏",
   "settings.githubTokenSave": "保存",
   "settings.githubTokenClear": "清空",
   "settings.githubTokenCreate": "创建 Token",
@@ -392,6 +397,11 @@ const en: Dict = {
   "settings.showInfoCollections": "Show signal radar on home",
   "settings.showInfoCollectionsHint":
     "When off, the dashboard hides the embedded NewsNow live feed and resource link panels.",
+  "settings.showTopSites": "Top Sites",
+  "settings.showTopSitesHint": "Show frequently visited sites on homepage",
+  "settings.homeWidgetsHint": "Control visibility of homepage modules",
+  "home.widgetHidden": "Hidden, restore in Settings",
+  "home.hideWidget": "Hide",
   "settings.githubTokenSave": "Save",
   "settings.githubTokenClear": "Clear",
   "settings.githubTokenCreate": "Create token",
