@@ -811,7 +811,7 @@ export default function Dashboard({
                   {t("discover.widget.title")}
                 </h2>
                 <div
-                  className="inline-flex items-center gap-0.5 rounded-lg border bg-card/80 p-0.5 text-[11px]"
+                  className="inline-flex items-center gap-0.5 rounded-md bg-muted/60 p-0.5 text-[11px]"
                   role="tablist"
                   aria-label="Mode"
                 >
@@ -828,8 +828,8 @@ export default function Dashboard({
                         className={cn(
                           "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium transition",
                           widgetMode === m
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                            ? "bg-card text-foreground shadow-sm ring-1 ring-border/40"
+                            : "text-muted-foreground hover:text-foreground",
                         )}
                       >
                         <Icon className="h-3 w-3" />
@@ -839,7 +839,7 @@ export default function Dashboard({
                   })}
                 </div>
                 <div
-                  className="inline-flex items-center gap-0.5 rounded-lg border bg-card/80 p-0.5 text-[11px]"
+                  className="flex flex-1 items-center gap-0.5 rounded-md bg-muted/60 p-0.5 text-[11px]"
                   role="tablist"
                   aria-label={t("discover.widget.title")}
                 >
@@ -852,10 +852,10 @@ export default function Dashboard({
                         aria-selected={widgetRange === r}
                         onClick={() => setWidgetRange(r)}
                         className={cn(
-                          "rounded-md px-2 py-0.5 font-medium transition",
+                          "flex-1 rounded-md px-2 py-0.5 font-medium transition text-center",
                           widgetRange === r
-                            ? "bg-primary text-primary-foreground shadow-sm"
-                            : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                            ? "bg-card text-foreground shadow-sm ring-1 ring-border/40"
+                            : "text-muted-foreground hover:text-foreground",
                         )}
                       >
                         {t(`discover.range.${r}`)}
