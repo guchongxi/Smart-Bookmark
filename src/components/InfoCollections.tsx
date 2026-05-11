@@ -2,14 +2,13 @@ import type { MouseEvent } from "react";
 import {
   ArrowUpRight,
   Check,
-  ExternalLink,
   Info,
   Newspaper,
   Radio,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
-import { cn, faviconOf, hostnameOf } from "@/lib/utils";
+import { cn, faviconOf } from "@/lib/utils";
 import { resolveLanguage } from "@/lib/i18n";
 import type { Language } from "@/types";
 import { useNewsNowAuth } from "@/hooks/useNewsNowAuth";
@@ -40,7 +39,7 @@ const NEWSNOW_URL = "https://newsnow.busiyi.world/";
 // 足以达到 NewsNow 的 3 列响应式断点，同时文字不会过小。
 // （上一轮 0.62 为了勉强填出 3 列导致文字偏小，这里以「反向思路」调整：
 //  同时压缩 sidebar 到 260px，让 iframe 列能够容纳更高 scale。）
-const NEWSNOW_FRAME_SCALE = 0.74;
+const NEWSNOW_FRAME_SCALE = 0.70;
 
 const COLLECTIONS: CollectionGroup[] = [
   {
@@ -212,14 +211,14 @@ export default function InfoCollections({
         配合 scale 0.74，NewsNow 文字明显变大且依然保持 3 列。
         单列布局（<2xl）：iframe 在上、sidebar 在下，符合移动/小屏阅读顺序。
       */}
-      <div className="grid gap-3.5 2xl:grid-cols-[260px_minmax(0,1fr)]">
-        <div className="order-2 grid gap-3.5 lg:grid-cols-2 2xl:order-1 2xl:grid-cols-1">
-          <LinkPanel group={trendGroup} lang={lang} />
-          <LinkPanel group={toolGroup} lang={lang} />
-        </div>
-
-        <div className="order-1 2xl:order-2">
-          <LiveNewsFrame lang={lang} />
+      <div className="space-y-3.5">
+        <LiveNewsFrame lang={lang} />
+        <div className="rounded-xl border bg-card/40 p-3">
+          <div className="space-y-4">
+            <ChipGroup group={trendGroup} lang={lang} />
+            <div className="h-px bg-border/60" />
+            <ChipGroup group={toolGroup} lang={lang} />
+          </div>
         </div>
       </div>
     </section>
@@ -281,7 +280,7 @@ function LiveNewsFrame({ lang }: { lang: "zh" | "en" }) {
           </a>
         </div>
       </div>
-      <div className="relative flex-1 min-h-[460px] overflow-hidden bg-background 2xl:min-h-[560px]">
+      <div className="relative flex-1 min-h-[500px] overflow-hidden bg-background 2xl:min-h-[600px]">
         <iframe
           title="NewsNow"
           src={NEWSNOW_URL}
@@ -368,7 +367,7 @@ function LoginPromptButton({
   );
 }
 
-function LinkPanel({
+function ChipGroup({
   group,
   lang,
 }: {
@@ -376,21 +375,16 @@ function LinkPanel({
   lang: "zh" | "en";
 }) {
   return (
-    <div className="flex flex-col rounded-2xl border bg-card p-2.5 shadow-sm ring-1 ring-black/[0.02] transition-shadow hover:shadow-md dark:ring-white/[0.04]">
-      <div className="flex items-center gap-2.5 px-1">
-        <SectionIcon Icon={group.Icon} accent={group.accent} />
-        <div className="min-w-0 flex-1">
-          <h3 className="truncate text-sm font-semibold tracking-tight">
-            {group.title[lang]}
-          </h3>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {group.subtitle[lang]}
-          </p>
-        </div>
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 px-1">
+        <SectionIcon Icon={group.Icon} accent={group.accent} size="md" />
+        <span className="text-xs font-semibold tracking-tight text-muted-foreground">
+          {group.title[lang]}
+        </span>
       </div>
-      <div className="mt-2.5 grid flex-1 gap-1">
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
         {group.items.map((item) => (
-          <CompactLink key={item.url} item={item} lang={lang} />
+          <ChipLink key={item.url} item={item} lang={lang} />
         ))}
       </div>
     </div>
@@ -433,30 +427,15 @@ function SectionIcon({
   );
 }
 
-function CompactLink({
-  item,
-  lang,
-}: {
-  item: CollectionItem;
-  lang: "zh" | "en";
-}) {
+function ChipLink({ item, lang }: { item: CollectionItem; lang: "zh" | "en" }) {
   return (
     <a
       href={item.url}
       target="_blank"
       rel="noreferrer"
-      title={item.url}
-      className={cn(
-        "group/item relative grid grid-cols-[28px_1fr_auto] items-center gap-2 rounded-lg border border-transparent px-2 py-1.5 transition",
-        "hover:-translate-y-px hover:border-border/80 hover:bg-accent/60 hover:shadow-sm",
-      )}
+      className="group/chip flex items-start gap-2 rounded-lg border border-transparent bg-card/60 p-2 transition hover:border-border/80 hover:bg-accent/40 hover:shadow-sm"
     >
-      {/* hover 时左侧 accent 指示条 */}
-      <span
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-primary opacity-0 transition group-hover/item:opacity-100"
-      />
-      <div className="flex h-7 w-7 items-center justify-center rounded-md bg-gradient-to-br from-background to-muted/40 ring-1 ring-border/80 transition group-hover/item:ring-primary/30">
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-background to-muted/40 ring-1 ring-border/80">
         <img
           src={faviconOf(item.url, 32)}
           alt=""
@@ -464,20 +443,19 @@ function CompactLink({
           onError={(e) => (e.currentTarget.style.visibility = "hidden")}
         />
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-medium tracking-tight transition group-hover/item:text-primary">
+          <span className="truncate text-sm font-medium tracking-tight transition group-hover/chip:text-primary">
             {item.title}
           </span>
-          <span className="hidden shrink-0 rounded-full bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border/50 sm:inline">
+          <span className="shrink-0 rounded-full bg-muted/80 px-1.5 py-0.5 text-[10px] text-muted-foreground ring-1 ring-border/50">
             {item.tag[lang]}
           </span>
         </div>
-        <div className="truncate text-[11px] text-muted-foreground/90">
-          {item.description[lang]} · {hostnameOf(item.url)}
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground/90 line-clamp-1">
+          {item.description[lang]}
         </div>
       </div>
-      <ExternalLink className="h-3.5 w-3.5 text-muted-foreground opacity-60 transition group-hover/item:translate-x-0.5 group-hover/item:text-primary group-hover/item:opacity-100" />
     </a>
   );
 }
