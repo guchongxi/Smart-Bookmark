@@ -99,6 +99,24 @@ export const BUILTIN_ENGINES: EngineDef[] = [
     url: (q) => `https://www.perplexity.ai/?q=${encodeURIComponent(q)}`,
     host: "perplexity.ai",
   },
+  {
+    id: "deepseek",
+    name: "DeepSeek",
+    url: (q) => `https://chat.deepseek.com/?q=${encodeURIComponent(q)}`,
+    host: "deepseek.com",
+  },
+  {
+    id: "qwen",
+    name: "千问",
+    url: (q) => `https://tongyi.aliyun.com/qianwen/?q=${encodeURIComponent(q)}`,
+    host: "tongyi.aliyun.com",
+  },
+  {
+    id: "gemini",
+    name: "Gemini",
+    url: (q) => `https://gemini.google.com/?q=${encodeURIComponent(q)}`,
+    host: "gemini.google.com",
+  },
 ];
 
 function toEngineDef(c: CustomEngine): EngineDef {

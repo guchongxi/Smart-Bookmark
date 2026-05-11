@@ -27,7 +27,7 @@ import {
   MoreHorizontal,
   Pin,
   Folder,
-  History as HistoryIcon,
+
   ChevronRight,
   ChevronDown,
   X,
@@ -37,6 +37,10 @@ import {
   TrendingUp,
   LayoutGrid,
   LayoutList,
+  Wand2,
+  ArrowLeftRight,
+  Database,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import TrendingPanel from "@/components/TrendingPanel";
 import { rangeToWindowDays } from "@/lib/github";
@@ -47,6 +51,7 @@ import QrDialog from "./QrDialog";
 import FolderTree from "@/components/FolderTree";
 import EngineSwitcher from "@/components/EngineSwitcher";
 import { findEngine } from "@/lib/engines";
+import { searchRank } from "@/lib/searchRank";
 import InfoCollections from "@/components/InfoCollections";
 import TopSitesSidebar from "@/components/widgets/TopSitesSidebar";
 import TrendingSidebar from "@/components/widgets/TrendingSidebar";
@@ -136,6 +141,8 @@ export default function Dashboard({
   const [page, setPage] = useState<number>(1);
   const searchWrapRef = useRef<HTMLFormElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const itemRefs = useRef<(HTMLElement | null)[]>([]);
   const isMac = useMemo(
     () =>
       typeof navigator !== "undefined" &&
@@ -217,6 +224,96 @@ export default function Dashboard({
     if (!q) return items;
     return items.filter((b) => matchesQuery(b, q));
   }, [items, query, matchesQuery]);
+
+  const commandResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!searchFocused) return null;
+
+    // 1. 搜索引擎快捷操作
+    const engineActions = q
+      ? [
+          {
+            type: "engine" as const,
+            id: "search",
+            title: `${t("common.search")} "${query.trim()}"`,
+            subtitle: findEngine(settings, settings.searchEngine)?.name ?? "",
+            icon: Search,
+          },
+          {
+            type: "engine" as const,
+            id: "compare",
+            title: t("dash.compareSearch") || "对比搜索",
+            subtitle: `${settings.compareEngines.length} ${t("common.engines") || "个引擎"}`,
+            icon: ArrowLeftRight,
+          },
+        ]
+      : [];
+
+    // 2. 书签结果（searchRank 排序）
+    const bookmarkHits = q
+      ? searchRank(
+          items.map((b) => ({ title: b.title, url: b.url, id: b.id })),
+          query.trim(),
+          6,
+        ).map((hit) => ({
+          type: "bookmark" as const,
+          id: hit.id,
+          title: hit.title,
+          url: hit.url,
+        }))
+      : [];
+
+    // 3. 历史记录
+    const historyItems = historyHits.slice(0, 5).map((h) => ({
+      type: "history" as const,
+      id: h.url,
+      title: h.title,
+      url: h.url,
+    }));
+
+    // 4. 常去站点
+    const topSiteItems = topSites.slice(0, 4).map((s) => ({
+      type: "topsite" as const,
+      id: s.url,
+      title: s.title,
+      url: s.url,
+    }));
+
+    // 5. 功能入口
+    const functionItems = q
+      ? [
+          { type: "function" as const, id: "cleaner", title: t("nav.cleaner") || "清理中心", icon: Wand2 },
+          { type: "function" as const, id: "compare", title: t("nav.compare") || "对比搜索", icon: ArrowLeftRight },
+          { type: "function" as const, id: "ai", title: t("nav.ai") || "AI 助手", icon: Sparkles },
+          { type: "function" as const, id: "backup", title: t("nav.backup") || "备份", icon: Database },
+          { type: "function" as const, id: "settings", title: t("nav.settings") || "设置", icon: SettingsIcon },
+        ].filter(
+          (f) =>
+            f.title.toLowerCase().includes(q) ||
+            f.id.includes(q),
+        )
+      : [];
+
+    const groups = [
+      { label: "", items: engineActions },
+      { label: t("dash.bookmarks") || "书签", items: bookmarkHits },
+      { label: t("dash.history") || "历史", items: historyItems },
+      { label: t("dash.topSites") || "常去", items: topSiteItems },
+      { label: t("dash.functions") || "功能", items: functionItems },
+    ].filter((g) => g.items.length > 0);
+
+    // 展平为列表
+    const flat: Array<
+      | { type: "label"; label: string }
+      | (typeof groups)[number]["items"][number]
+    > = [];
+    for (const g of groups) {
+      if (g.label) flat.push({ type: "label", label: g.label });
+      flat.push(...g.items);
+    }
+
+    return flat;
+  }, [query, searchFocused, items, historyHits, topSites, settings, t]);
 
   const pageCount = Math.max(
     1,
@@ -322,17 +419,69 @@ export default function Dashboard({
     await setSettings({ searchEngine: id });
   };
 
+  const executeCommandResult = (
+    result: { type: string; [key: string]: unknown },
+  ) => {
+    switch (result.type) {
+      case "engine":
+        if (result.id === "compare") {
+          const qq = query.trim();
+          for (const id of settings.compareEngines) {
+            const eng = findEngine(settings, id);
+            if (eng) window.open(eng.url(qq), "_blank");
+          }
+        } else {
+          const engine = findEngine(settings, settings.searchEngine);
+          if (engine) window.open(engine.url(query.trim()), "_blank");
+        }
+        break;
+      case "bookmark":
+      case "history":
+      case "topsite":
+        if (result.url) window.open(result.url as string, "_blank");
+        break;
+      case "function":
+        if (result.id) {
+          const p = new URLSearchParams(window.location.hash.slice(1));
+          p.set("tab", result.id as string);
+          window.location.hash = "#" + p.toString();
+        }
+        break;
+    }
+    setSearchFocused(false);
+    setQuery("");
+  };
+
   const onSubmitSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    const q = query.trim();
-    if (!q) return;
-    const hit = filtered[0];
-    if (hit) {
-      window.open(hit.url, "_blank");
+    if (!commandResults || commandResults.length === 0) {
+      // fallback: 搜索引擎
+      const q = query.trim();
+      if (q) {
+        const engine = findEngine(settings, settings.searchEngine);
+        if (engine) window.open(engine.url(q), "_blank");
+      }
       return;
     }
-    const engine = findEngine(settings, settings.searchEngine);
-    if (engine) window.open(engine.url(q), "_blank");
+
+    // 找到选中的非 label 项
+    let realIdx = -1;
+    for (let i = 0; i < commandResults.length; i++) {
+      const r = commandResults[i];
+      if (r.type === "label") continue;
+      realIdx++;
+      if (realIdx === selectedIdx) {
+        executeCommandResult(r);
+        return;
+      }
+    }
+
+    // fallback
+    const q = query.trim();
+    if (q) {
+      const engine = findEngine(settings, settings.searchEngine);
+      if (engine) window.open(engine.url(q), "_blank");
+    }
   };
 
   const canReorder = !!selected && !query.trim() && items.length > 0;
@@ -467,6 +616,14 @@ export default function Dashboard({
   }, [searchFocused]);
 
   useEffect(() => {
+    setSelectedIdx(0);
+  }, [query, searchFocused]);
+
+  useEffect(() => {
+    itemRefs.current[selectedIdx]?.scrollIntoView({ block: "nearest" });
+  }, [selectedIdx]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
@@ -599,6 +756,20 @@ export default function Dashboard({
                     }
                     return;
                   }
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    if (commandResults) {
+                      setSelectedIdx((prev) =>
+                        Math.min(prev + 1, commandResults.filter((r) => r.type !== "label").length - 1),
+                      );
+                    }
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSelectedIdx((prev) => Math.max(0, prev - 1));
+                    return;
+                  }
                   if (
                     e.key === "Enter" &&
                     (e.metaKey || e.ctrlKey) &&
@@ -665,36 +836,67 @@ export default function Dashboard({
             </div>
           )}
 
-          {searchFocused && historyHits.length > 0 && (
+          {searchFocused && commandResults && commandResults.length > 0 && (
             <div className="relative">
-              <div className="absolute inset-x-0 top-2 z-30 mx-auto max-w-2xl overflow-hidden rounded-2xl border bg-white shadow-2xl ring-1 ring-black/5 dark:bg-slate-900 dark:ring-white/10">
-                <div className="bg-white px-4 py-2 text-[11px] text-muted-foreground dark:bg-slate-900">
-                  <HistoryIcon className="mr-1 inline h-3 w-3" />
-                  浏览历史
-                </div>
-                <div className="max-h-[320px] overflow-auto bg-white dark:bg-slate-900">
-                  {historyHits.map((h) => (
-                    <a
-                      key={h.url}
-                      href={h.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="flex items-center gap-2 border-t bg-white px-4 py-2 text-sm transition hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
-                    >
-                      <FaviconImg
-                        url={h.url}
-                        size={16}
-                        className="h-4 w-4 rounded"
-                      />
-                      <span className="flex-1 truncate">{h.title}</span>
-                      <span className="truncate text-xs text-muted-foreground">
-                        {hostnameOf(h.url)}
-                      </span>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        history
-                      </span>
-                    </a>
-                  ))}
+              <div className="absolute inset-x-0 top-2 z-30 mx-auto max-w-2xl overflow-hidden rounded-2xl border bg-white/95 shadow-2xl ring-1 ring-black/5 backdrop-blur-md dark:bg-slate-900/95 dark:ring-white/10">
+                <div className="max-h-[400px] overflow-auto py-1 scrollbar-thin">
+                  {(() => {
+                    let realIdx = -1;
+                    return commandResults.map((r, i) => {
+                      if (r.type === "label") {
+                        return (
+                          <div
+                            key={`label-${i}`}
+                            className="px-4 py-1.5 text-[11px] font-medium text-muted-foreground"
+                          >
+                            {r.label}
+                          </div>
+                        );
+                      }
+                      realIdx++;
+                      const idx = realIdx;
+                      const isSelected = idx === selectedIdx;
+
+                      return (
+                        <button
+                          key={`${r.type}-${i}`}
+                          ref={(el) => { itemRefs.current[idx] = el; }}
+                          type="button"
+                          onClick={() => executeCommandResult(r)}
+                          onMouseEnter={() => setSelectedIdx(idx)}
+                          className={cn(
+                            "flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition",
+                            isSelected
+                              ? "bg-accent text-foreground"
+                              : "text-muted-foreground hover:bg-accent/50",
+                          )}
+                        >
+                          {"url" in r && r.url ? (
+                            <FaviconImg
+                              url={r.url as string}
+                              size={16}
+                              className="h-4 w-4 rounded shrink-0"
+                            />
+                          ) : "icon" in r && r.icon ? (
+                            <r.icon className="h-4 w-4 shrink-0" />
+                          ) : null}
+                          <span className="flex-1 truncate">
+                            {"title" in r ? (r.title as string) : ""}
+                          </span>
+                          {"subtitle" in r && r.subtitle && (
+                            <span className="shrink-0 text-xs text-muted-foreground/70">
+                              {r.subtitle as string}
+                            </span>
+                          )}
+                          {"url" in r && r.url && (
+                            <span className="shrink-0 truncate text-xs text-muted-foreground/50 max-w-[160px]">
+                              {hostnameOf(r.url as string)}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             </div>

@@ -36,7 +36,16 @@ export type SearchEngineId =
   | "github"
   | "stackoverflow"
   | "youtube"
-  | "mdn";
+  | "mdn"
+  | "kimi"
+  | "doubao"
+  | "chatgpt"
+  | "felo"
+  | "metaso"
+  | "perplexity"
+  | "deepseek"
+  | "qwen"
+  | "gemini";
 
 export type Language = "auto" | "zh" | "en";
 
