@@ -70,6 +70,8 @@ export interface TrendingPanelProps {
   headerExtra?: React.ReactNode;
   /** 根容器额外 className */
   className?: string;
+  /** 外部覆盖 grid 容器 className（sidebar 场景用单列） */
+  gridClassName?: string;
 }
 
 export default function TrendingPanel({
@@ -86,6 +88,7 @@ export default function TrendingPanel({
   hideControls = false,
   headerExtra,
   className,
+  gridClassName,
 }: TrendingPanelProps) {
   const t = useT();
   const [rangeState, setRangeState] = useState<TrendingRange>(
@@ -329,7 +332,7 @@ export default function TrendingPanel({
       )}
 
       {loading && list.length === 0 && (
-        <div className={cn("grid gap-3", gridCls)}>
+        <div className={cn("grid gap-3", gridCls, gridClassName)}>
           {Array.from({ length: compact ? 4 : 6 }).map((_, i) => (
             <div
               key={i}
@@ -352,6 +355,7 @@ export default function TrendingPanel({
             className={cn(
               "grid gap-3 transition-opacity duration-200",
               gridCls,
+              gridClassName,
               loading && "pointer-events-none opacity-45",
             )}
           >

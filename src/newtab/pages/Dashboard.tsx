@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -49,6 +48,10 @@ import FolderTree from "@/components/FolderTree";
 import EngineSwitcher from "@/components/EngineSwitcher";
 import { findEngine } from "@/lib/engines";
 import InfoCollections from "@/components/InfoCollections";
+import TopSitesSidebar from "@/components/widgets/TopSitesSidebar";
+import TrendingSidebar from "@/components/widgets/TrendingSidebar";
+import { HideWidgetButton } from "@/components/HideWidgetButton";
+import { Tooltip } from "@/components/ui/tooltip";
 
 interface Props {
   settings: Settings;
@@ -124,8 +127,6 @@ export default function Dashboard({
   const [widgetMode, setWidgetMode] = useState<TrendingMode>(
     settings.discoverDefaultMode ?? "created",
   );
-  const trendingSectionRef = useRef<HTMLElement>(null);
-  const [trendingHeight, setTrendingHeight] = useState<number | null>(null);
   const [pageSize, setPageSize] = useState<number>(() => {
     const raw = localStorage.getItem("sb_pageSize");
     if (raw === "Infinity") return Infinity;
@@ -177,19 +178,6 @@ export default function Dashboard({
         (sites || []).slice(0, 10).map((s) => ({ url: s.url, title: s.title })),
       );
     });
-  }, []);
-
-  useLayoutEffect(() => {
-    const el = trendingSectionRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) {
-        const h = Math.round(e.contentRect.height);
-        if (h > 0) setTrendingHeight(h);
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
@@ -514,10 +502,11 @@ export default function Dashboard({
   const greeting = useGreeting();
   const showHero = !selected && !query.trim();
   const showGithubTrendingWidget = settings.showGithubTrendingWidget ?? true;
+  const showTopSites = settings.showTopSites ?? true;
   const showInfoCollections = settings.showInfoCollections ?? true;
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)]">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-[240px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_280px]">
       <aside className="space-y-3 md:sticky md:top-20 md:self-start">
         {pinnedFolders.length > 0 && (
           <Card className="p-2">
@@ -741,15 +730,8 @@ export default function Dashboard({
         {showHero && (
           <div className="grid grid-cols-1 items-stretch gap-5 pt-2 md:grid-cols-12">
             {topSites.length > 0 && (
-              <aside className="hidden md:col-span-3 md:block">
-                <Card
-                  className="flex h-full flex-col p-3"
-                  style={
-                    showGithubTrendingWidget && trendingHeight
-                      ? { maxHeight: trendingHeight + "px" }
-                      : undefined
-                  }
-                >
+              <aside className="hidden md:col-span-3 md:block 2xl:hidden">
+                <Card className="flex h-full flex-col p-3">
                   <div className="mb-1 flex shrink-0 items-center gap-2 px-1">
                     <div className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-sky-500/20 to-indigo-500/20 text-sky-600 dark:text-sky-400">
                       <Clock className="h-3.5 w-3.5" />
@@ -763,6 +745,16 @@ export default function Dashboard({
                     >
                       TOP {topSites.length}
                     </span>
+                    <Tooltip content={t("home.widgetHidden") || "隐藏后可在设置中恢复"} side="bottom" align="start">
+                      <HideWidgetButton
+                        variant="inline"
+                        onClick={() => {
+                          setSettings({ showTopSites: false });
+                          toast(t("home.widgetHidden"), "info");
+                        }}
+                        label={t("home.hideWidget") || "隐藏"}
+                      />
+                    </Tooltip>
                     <span className="ml-auto text-[10px] text-muted-foreground/70">
                       自动
                     </span>
@@ -804,9 +796,8 @@ export default function Dashboard({
 
             {showGithubTrendingWidget && (
               <section
-                ref={trendingSectionRef}
                 className={cn(
-                  "col-span-1",
+                  "col-span-1 2xl:hidden",
                   topSites.length > 0
                     ? "md:col-span-9"
                     : "md:col-span-12",
@@ -872,6 +863,16 @@ export default function Dashboard({
                     ),
                   )}
                 </div>
+                <Tooltip content={t("home.widgetHidden") || "隐藏后可在设置中恢复"} side="bottom" align="start">
+                  <HideWidgetButton
+                    variant="inline"
+                    onClick={() => {
+                      setSettings({ showGithubTrendingWidget: false });
+                      toast(t("home.widgetHidden"), "info");
+                    }}
+                    label={t("home.hideWidget") || "隐藏"}
+                  />
+                </Tooltip>
                 <div className="flex-1" />
                 <button
                   type="button"
@@ -1158,6 +1159,25 @@ export default function Dashboard({
           </div>
         )}
       </section>
+
+      {/* 右侧 widget sidebar - 仅 2xl+ 显示 */}
+      {(showGithubTrendingWidget || showTopSites) && (
+        <aside className="hidden 2xl:block 2xl:sticky 2xl:top-20 2xl:self-start space-y-4">
+          {showTopSites && topSites.length > 0 && (
+            <TopSitesSidebar sites={topSites} limit={3} />
+          )}
+          {showGithubTrendingWidget && (
+            <TrendingSidebar
+              settings={settings}
+              mode={widgetMode}
+              range={widgetRange}
+              onModeChange={setWidgetMode}
+              onRangeChange={setWidgetRange}
+              onOpenDiscover={onOpenDiscover}
+            />
+          )}
+        </aside>
+      )}
 
       {ctxMenu &&
         createPortal(
