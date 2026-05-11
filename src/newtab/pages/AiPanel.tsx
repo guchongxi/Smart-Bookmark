@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { chat } from "@/lib/ai";
-import { BOOKMARK_TOOLS_OPENAI, BOOKMARK_TOOLS_ANTHROPIC, CONFIRM_REQUIRED_TOOLS, MCP_TOOL_NAMES, type BookmarkToolResult } from "@/lib/aiTools";
+import { BOOKMARK_TOOLS_OPENAI, CONFIRM_REQUIRED_TOOLS, MCP_TOOL_NAMES, type BookmarkToolResult } from "@/lib/aiTools";
 import { getBookmarkContextForAi } from "@/lib/aiBookmarkContext";
 import { renderMarkdown } from "@/lib/markdown";
 import {
@@ -837,7 +837,19 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       ...conversationHistory,
     ];
 
-    const tools = settings.aiProvider === "openai" ? BOOKMARK_TOOLS_OPENAI : BOOKMARK_TOOLS_ANTHROPIC;
+    // 动态构建工具列表：根据设置过滤 MCP 工具（与 send() 保持一致）
+    const baseTools = BOOKMARK_TOOLS_OPENAI.filter((t) => {
+      if (t.function.name === "web_reader") return settings.mcpWebReader;
+      if (t.function.name === "web_search") return settings.mcpWebSearch;
+      return true;
+    });
+    const tools = settings.aiProvider === "openai"
+      ? baseTools
+      : baseTools.map((t) => ({
+          name: t.function.name,
+          description: t.function.description,
+          input_schema: t.function.parameters,
+        }));
 
     setLoading(true);
     const ctrl = new AbortController();
@@ -849,6 +861,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     try {
       streamingRef.current = true;
       let acc = "";
+      let thinkingAcc = "";
       pendingToolCallsRef.current.clear();
       startPersistTimer(() => acc);
 
@@ -857,6 +870,20 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         messages: forApi,
         signal: ctrl.signal,
         tools,
+        onThinking: settings.showThinking ? (delta) => {
+          thinkingAcc += delta;
+          setMessages((prev) => {
+            const copy = [...prev];
+            for (let i = copy.length - 1; i >= 0; i--) {
+              if (copy[i].role === "assistant") {
+                copy[i] = { ...copy[i], thinking: thinkingAcc };
+                break;
+              }
+            }
+            return copy;
+          });
+          scrollToBottom();
+        } : undefined,
         onDelta: (d) => {
           acc += d;
           setMessages((prev) => {
