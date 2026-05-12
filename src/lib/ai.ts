@@ -78,7 +78,7 @@ async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onT
     const text = await res.text().catch(() => "");
     throw new Error(`OpenAI ${res.status}: ${text.slice(0, 200)}`);
   }
-  return await readSse(res.body, (evt) => {
+  const { text } = await readSse(res.body, (evt) => {
     try {
       const j = JSON.parse(evt);
       const choice = j.choices?.[0];
@@ -114,6 +114,7 @@ async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onT
       return "";
     }
   });
+  return text;
 }
 
 async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
@@ -185,7 +186,7 @@ async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, 
 
   const toolCallBuffers = new Map<string, { id: string; name: string; inputJson: string; _done?: boolean }>();
 
-  return await readSse(res.body, (evt) => {
+  const { text } = await readSse(res.body, (evt) => {
     try {
       const j = JSON.parse(evt);
 
@@ -234,6 +235,7 @@ async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, 
     } catch {}
     return "";
   });
+  return text;
 }
 
 export async function testAi(settings: Settings): Promise<{
@@ -345,7 +347,7 @@ function parseOpenAiJsonBody(raw: string): unknown {
 async function readSse(
   body: ReadableStream<Uint8Array>,
   onEvent: (data: string) => string,
-): Promise<string> {
+): Promise<{ text: string; completed: boolean }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
@@ -361,10 +363,15 @@ async function readSse(
         const m = line.match(/^data:\s*(.*)$/);
         if (!m) continue;
         const data = m[1];
-        if (data === "[DONE]") return full;
+        if (data === "[DONE]") return { text: full, completed: true };
         full += onEvent(data);
+        // 检测 Anthropic message_stop 事件
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.type === "message_stop") return { text: full, completed: true };
+        } catch {}
       }
     }
   }
-  return full;
+  return { text: full, completed: false };
 }

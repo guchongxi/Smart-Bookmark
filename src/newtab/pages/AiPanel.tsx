@@ -508,6 +508,11 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         onToolCall: makeOnToolCall(),
       });
       if (await checkToolCallsFromStream()) return;
+      // 检查是否实际获得了内容（防止流式中断导致空消息被持久化）
+      if (!acc) {
+        handleStreamError(new Error("AI 响应中断，请重试"));
+        return;
+      }
       setMessages((prev) => { persist(prev); return prev; });
     } catch (err: any) {
       handleStreamError(err);
@@ -898,6 +903,11 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       });
 
       if (await checkToolCallsFromStream()) return;
+      // 检查是否实际获得了内容（防止流式中断导致空消息被持久化）
+      if (!acc) {
+        handleStreamError(new Error("AI 响应中断，请重试"));
+        return;
+      }
       setMessages((prev) => { persist(prev); return prev; });
     } catch (err: any) {
       handleStreamError(err);
