@@ -1,16 +1,28 @@
 import type { AiMessage, Settings } from "@/types";
+import { sanitizeToolMessageHistory } from "@/lib/aiMessageHistory";
 
-function toApiMessages(messages: AiMessage[]) {
+function toApiMessages(
+  messages: AiMessage[],
+  options: { stripAssistantWithoutThinking?: boolean } = {},
+) {
   const result: unknown[] = [];
-  for (const m of messages) {
+  const sanitizedMessages = sanitizeToolMessageHistory(messages);
+  const skippedToolCallIds = new Set<string>();
+  for (const m of sanitizedMessages) {
     if (m.role === "tool") {
+      const toolCallId = m.toolResult?.toolCallId ?? "";
+      if (skippedToolCallIds.has(toolCallId)) continue;
       result.push({
         role: "tool",
-        tool_call_id: m.toolResult?.toolCallId ?? "",
+        tool_call_id: toolCallId,
         content: m.content,
       });
     } else if (m.role === "assistant" && m.toolCalls?.length) {
-      result.push({
+      if (options.stripAssistantWithoutThinking && !m.thinking) {
+        for (const toolCall of m.toolCalls) skippedToolCallIds.add(toolCall.id);
+        continue;
+      }
+      const assistantMessage: Record<string, unknown> = {
         role: "assistant",
         content: m.content || null,
         tool_calls: m.toolCalls.map((tc) => ({
@@ -21,9 +33,18 @@ function toApiMessages(messages: AiMessage[]) {
             arguments: JSON.stringify(tc.args),
           },
         })),
-      });
+      };
+      if (m.thinking) assistantMessage.reasoning_content = m.thinking;
+      result.push(assistantMessage);
     } else if (m.role !== "system" && m.role !== "tool-confirm") {
-      result.push({ role: m.role, content: m.content });
+      if (options.stripAssistantWithoutThinking && m.role === "assistant" && !m.thinking) {
+        continue;
+      }
+      const apiMessage: Record<string, unknown> = { role: m.role, content: m.content };
+      if (m.role === "assistant" && m.thinking) {
+        apiMessage.reasoning_content = m.thinking;
+      }
+      result.push(apiMessage);
     }
   }
   return result;
@@ -31,6 +52,7 @@ function toApiMessages(messages: AiMessage[]) {
 
 export interface ToolCallDelta {
   id: string;
+  index?: number;
   name?: string;
   arguments?: string;
   done?: boolean;
@@ -58,27 +80,46 @@ async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onT
     /\/+$/,
     "",
   );
-  const body: Record<string, unknown> = {
-    model: settings.aiModel || "gpt-4o-mini",
-    messages: toApiMessages(messages),
-    stream: true,
-  };
-  if (tools?.length) body.tools = tools;
+  const request = (apiMessages: unknown[]) => {
+    const body: Record<string, unknown> = {
+      model: settings.aiModel || "gpt-4o-mini",
+      messages: apiMessages,
+      stream: true,
+    };
+    if (tools?.length) body.tools = tools;
 
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    signal,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${settings.aiApiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
+    return fetch(`${base}/chat/completions`, {
+      method: "POST",
+      signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${settings.aiApiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+  };
+
+  let res = await request(toApiMessages(messages));
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
+    if (text.includes("reasoning_content")) {
+      res = await request(toApiMessages(messages, { stripAssistantWithoutThinking: true }));
+      if (res.ok && res.body) {
+        return await readOpenAiStream(res.body, onDelta, onToolCall, onThinking);
+      }
+    }
     throw new Error(`OpenAI ${res.status}: ${text.slice(0, 200)}`);
   }
-  const { text } = await readSse(res.body, (evt) => {
+  return await readOpenAiStream(res.body, onDelta, onToolCall, onThinking);
+}
+
+async function readOpenAiStream(
+  body: ReadableStream<Uint8Array>,
+  onDelta?: (delta: string) => void,
+  onToolCall?: (call: ToolCallDelta) => void,
+  onThinking?: (delta: string) => void,
+): Promise<string> {
+  const { text } = await readSse(body, (evt) => {
     try {
       const j = JSON.parse(evt);
       const choice = j.choices?.[0];
@@ -98,6 +139,7 @@ async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onT
         for (const tc of delta.tool_calls) {
           onToolCall({
             id: tc.id ?? "",
+            index: typeof tc.index === "number" ? tc.index : undefined,
             name: tc.function?.name,
             arguments: tc.function?.arguments,
           });

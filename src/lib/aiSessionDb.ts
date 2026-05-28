@@ -4,11 +4,23 @@
  */
 
 import type { AiSession } from "@/types";
+import { sanitizeToolMessageHistory } from "@/lib/aiMessageHistory";
 
 const DB_NAME = "smart-bookmark-ai-sessions";
 const STORE_NAME = "sessions";
 const DB_VERSION = 1;
 const TTL_MS = 15 * 24 * 60 * 60 * 1000; // 15 天
+
+function sanitizeSession(session: AiSession): AiSession {
+  return {
+    ...session,
+    messages: sanitizeToolMessageHistory(session.messages),
+  };
+}
+
+function hasMessageChanges(before: AiSession, after: AiSession): boolean {
+  return JSON.stringify(before.messages) !== JSON.stringify(after.messages);
+}
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -38,7 +50,9 @@ export async function listSessions(): Promise<AiSession[]> {
       if (now - s.updatedAt > TTL_MS) {
         store.delete(s.id);
       } else {
-        valid.push(s);
+        const sanitizedSession = sanitizeSession(s);
+        if (hasMessageChanges(s, sanitizedSession)) store.put(sanitizedSession);
+        valid.push(sanitizedSession);
       }
     }
     valid.sort((a, b) => b.updatedAt - a.updatedAt);
@@ -55,7 +69,7 @@ export async function getSession(id: string): Promise<AiSession | null> {
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const req = tx.objectStore(STORE_NAME).get(id);
-      req.onsuccess = () => resolve(req.result ?? null);
+      req.onsuccess = () => resolve(req.result ? sanitizeSession(req.result) : null);
       req.onerror = () => resolve(null);
     });
   } catch {
@@ -72,7 +86,7 @@ export async function createSession(
   const session: AiSession = {
     id: crypto.randomUUID(),
     title: title.slice(0, 30),
-    messages,
+    messages: sanitizeToolMessageHistory(messages),
     createdAt: now,
     updatedAt: now,
   };
@@ -100,7 +114,7 @@ export async function updateSession(
   if (!existing) return;
   const updated: AiSession = {
     ...existing,
-    messages,
+    messages: sanitizeToolMessageHistory(messages),
     updatedAt: Date.now(),
     ...(title != null ? { title: title.slice(0, 30) } : {}),
     ...(systemPrompt != null ? { systemPrompt } : {}),

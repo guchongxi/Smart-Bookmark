@@ -67,6 +67,13 @@ const SYSTEM_PROMPT = [
   "- update_memory：修改已有条目的内容",
 ].join("\n");
 
+type ToolCallState = {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  thinking?: string;
+};
+
 function formatMsgTime(
   at: number | undefined,
   language: Settings["language"],
@@ -101,6 +108,33 @@ function relativeTime(ts: number, language: Settings["language"]) {
   );
 }
 
+function normalizeToolId(value: unknown): string {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  const id = String(value).trim();
+  const invalidIds = new Set(["", "undefined", "null", "nan"]);
+  return invalidIds.has(id.toLowerCase()) ? "" : id;
+}
+
+function validateConfirmToolCall(
+  tc: { id: string; name: string; args: Record<string, unknown> },
+): { ok: true; call: { id: string; name: string; args: Record<string, unknown> } } | { ok: false; missing: string[] } {
+  const bookmarkId = normalizeToolId(tc.args.bookmarkId);
+  const missing: string[] = [];
+  const args = { ...tc.args };
+
+  if (!bookmarkId) missing.push("bookmarkId");
+  else args.bookmarkId = bookmarkId;
+
+  if (tc.name === "move_bookmark") {
+    const targetFolderId = normalizeToolId(tc.args.targetFolderId);
+    if (!targetFolderId) missing.push("targetFolderId");
+    else args.targetFolderId = targetFolderId;
+  }
+
+  if (missing.length) return { ok: false, missing };
+  return { ok: true, call: { ...tc, args } };
+}
+
 export default function AiPanel({ settings }: { settings: Settings }) {
   const t = useT();
 
@@ -121,6 +155,10 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const inputRef = useRef<HTMLInputElement>(null);
   /** 正在累积的 tool call（流式中间态） */
   const pendingToolCallsRef = useRef<Map<string, { id: string; name: string; argsStr: string; _done?: boolean }>>(new Map());
+  /** OpenAI 流式 tool call 后续分片通常只有 index，没有 id。 */
+  const pendingToolCallIndexRef = useRef<Map<number, string>>(new Map());
+  /** 当前流式 assistant 的 reasoning_content，用于 tool call 历史回传 */
+  const streamThinkingRef = useRef("");
   /** 始终持有最新 messages 的 ref，避免闭包陈旧 */
   const messagesRef = useRef<AiMessage[]>([]);
   /** 保存本轮对话的书签快照，continueChat 不重新拉取 */
@@ -128,7 +166,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   /** 当前会话的系统提示词（新建时构建，后续复用） */
   const systemPromptRef = useRef<string>("");
   /** tool-confirm 状态：当前等待用户确认的 tool call */
-  const [confirmToolCall, setConfirmToolCall] = useState<{ id: string; name: string; args: Record<string, unknown> } | null>(null);
+  const [confirmToolCalls, setConfirmToolCalls] = useState<ToolCallState[]>([]);
+  /** 当前会话内已允许免确认的高风险工具名 */
+  const autoConfirmToolNamesRef = useRef<Set<string>>(new Set());
 
   /* ── 画像/记忆面板状态 ── */
   const [activePanel, setActivePanel] = useState<"profile" | "memory" | null>(null);
@@ -187,6 +227,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       setSessionId(id);
       setMessages(s.messages);
       systemPromptRef.current = s.systemPrompt ?? "";
+      autoConfirmToolNamesRef.current.clear();
       scrollToBottom();
     },
     [sessionId, sessions],
@@ -199,6 +240,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     setSessions((prev) => [s, ...prev]);
     setSessionId(s.id);
     setMessages([]);
+    autoConfirmToolNamesRef.current.clear();
   }, []);
 
   /* ── 删除会话 ── */
@@ -212,6 +254,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
           sessionIdRef.current = fallback?.id ?? null;
           setSessionId(fallback?.id ?? null);
           setMessages(fallback?.messages ?? []);
+          autoConfirmToolNamesRef.current.clear();
         }
         return next;
       });
@@ -301,13 +344,32 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       for (const tc of pendingToolCallsRef.current.values()) tc._done = true;
       return;
     }
-    if (call.id) {
-      const existing = pendingToolCallsRef.current.get(call.id) ?? { id: call.id, name: "", argsStr: "", _done: false };
-      if (call.name) existing.name = call.name;
-      if (call.arguments) existing.argsStr += call.arguments;
-      if (call.done) existing._done = true;
-      pendingToolCallsRef.current.set(call.id, existing);
+
+    let key = call.id;
+    if (call.index != null) {
+      const indexKey = pendingToolCallIndexRef.current.get(call.index);
+      if (call.id) {
+        if (indexKey && indexKey !== call.id) {
+          const indexedCall = pendingToolCallsRef.current.get(indexKey);
+          if (indexedCall) {
+            pendingToolCallsRef.current.delete(indexKey);
+            pendingToolCallsRef.current.set(call.id, { ...indexedCall, id: call.id });
+          }
+        }
+        pendingToolCallIndexRef.current.set(call.index, call.id);
+      } else {
+        key = indexKey ?? `index:${call.index}`;
+        pendingToolCallIndexRef.current.set(call.index, key);
+      }
     }
+
+    if (!key) return;
+
+    const existing = pendingToolCallsRef.current.get(key) ?? { id: key, name: "", argsStr: "", _done: false };
+    if (call.name) existing.name = call.name;
+    if (call.arguments) existing.argsStr += call.arguments;
+    if (call.done) existing._done = true;
+    pendingToolCallsRef.current.set(key, existing);
   };
 
   /** 流式结束后检查并处理 tool calls */
@@ -320,7 +382,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         args: JSON.parse(tc.argsStr || "{}") as Record<string, unknown>,
       }));
       setMessages((prev) => prev.slice(0, -1));
-      await handleToolCallDone(parsed);
+      await handleToolCallDone(parsed, streamThinkingRef.current);
       return true;
     }
     return false;
@@ -366,7 +428,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const send = async (override?: string) => {
     const text = (override ?? input).trim();
     if (!text) return;
-    setConfirmToolCall(null);
+    setConfirmToolCalls([]);
     if (settings.aiProvider === "none" || !settings.aiApiKey) {
       alert(t("ai.needKey"));
       return;
@@ -461,6 +523,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       streamingRef.current = true;
       let acc = "";
       let thinkingAcc = "";
+      streamThinkingRef.current = "";
+      pendingToolCallsRef.current.clear();
+      pendingToolCallIndexRef.current.clear();
       startPersistTimer(() => acc);
 
       // 动态构建工具列表：根据设置包含 MCP 工具
@@ -481,8 +546,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         messages: forApi,
         signal: ctrl.signal,
         tools,
-        onThinking: settings.showThinking ? (delta) => {
+        onThinking: (delta) => {
           thinkingAcc += delta;
+          streamThinkingRef.current = thinkingAcc;
           setMessages((prev) => {
             const copy = [...prev];
             for (let i = copy.length - 1; i >= 0; i--) {
@@ -494,7 +560,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
             return copy;
           });
           scrollToBottom();
-        } : undefined,
+        },
         onDelta: (d) => {
           acc += d;
           setMessages((prev) => {
@@ -654,7 +720,10 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   };
 
   /** 处理 tool call 完成后的执行逻辑 */
-  const handleToolCallDone = async (toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => {
+  const handleToolCallDone = async (
+    toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>,
+    assistantThinking = "",
+  ) => {
     setLoading(false);
     if (persistTimerRef.current) {
       clearInterval(persistTimerRef.current);
@@ -665,6 +734,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     const MEMORY_TOOLS = new Set(["save_memory", "list_memory", "delete_memory", "update_memory"]);
     const memoryCalls = toolCalls.filter((tc) => MEMORY_TOOLS.has(tc.name));
     const otherCalls = toolCalls.filter((tc) => !MEMORY_TOOLS.has(tc.name));
+    const memoryConversationAdditions: AiMessage[] = [];
 
     for (const tc of memoryCalls) {
       let result: BookmarkToolResult;
@@ -679,53 +749,109 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         role: "assistant",
         content: "",
         toolCalls: [tc],
+        ...(assistantThinking ? { thinking: assistantThinking } : {}),
       };
       const toolResult: AiMessage = {
         role: "tool",
         content: JSON.stringify(result),
         toolResult: { toolCallId: tc.id, ...result },
       };
+      memoryConversationAdditions.push(assistantMsg, toolResult);
       setMessages((prev) => [...prev, assistantMsg, toolResult]);
       setMessages((prev) => { persist(prev); return prev; });
     }
 
     if (otherCalls.length === 0) {
-      // 全是记忆工具，直接继续对话
-      await continueChat([...messagesRef.current], bookmarkCtxRef.current);
+      // 全是记忆工具，继续对话时必须带上对应的 assistant/tool 消息对
+      await continueChat(
+        [...messagesRef.current, ...memoryConversationAdditions],
+        bookmarkCtxRef.current,
+      );
       return;
     }
 
-    for (const tc of otherCalls) {
-      if (CONFIRM_REQUIRED_TOOLS.has(tc.name)) {
+    const confirmCalls = otherCalls.filter((tc) => CONFIRM_REQUIRED_TOOLS.has(tc.name));
+    const directCalls = otherCalls.filter((tc) => !CONFIRM_REQUIRED_TOOLS.has(tc.name));
+    if (confirmCalls.length > 0) {
+      const needsConfirm = confirmCalls.filter((tc) => !autoConfirmToolNamesRef.current.has(tc.name));
+      if (needsConfirm.length === 0) {
+        await executeToolCalls([...directCalls, ...confirmCalls], assistantThinking);
+        return;
+      }
+
+      const validConfirmCalls: ToolCallState[] = [];
+      const summaries: string[] = [];
+
+      for (const tc of confirmCalls) {
+        const validation = validateConfirmToolCall(tc);
+        if (!validation.ok) {
+          const result: BookmarkToolResult = {
+            success: false,
+            message: `缺少有效参数：${validation.missing.join("、")}。请先查询真实书签或文件夹 ID 后重试。`,
+          };
+          const assistantMsg: AiMessage = {
+            role: "assistant",
+            content: "",
+            toolCalls: [tc],
+            ...(assistantThinking ? { thinking: assistantThinking } : {}),
+          };
+          const toolResult: AiMessage = {
+            role: "tool",
+            content: JSON.stringify(result),
+            toolResult: { toolCallId: tc.id, ...result },
+          };
+          const noticeMsg: AiMessage = {
+            role: "assistant",
+            content: result.message,
+            at: Date.now(),
+          };
+          setMessages((prev) => {
+            const next = [...prev, assistantMsg, toolResult, noticeMsg];
+            persist(next);
+            return next;
+          });
+          return;
+        }
+
+        const validCall = validation.call;
         // 查询书签和文件夹的实际名称
-        const bookmarkId = String(tc.args.bookmarkId ?? "");
-        const targetFolderId = String(tc.args.targetFolderId ?? "");
+        const bookmarkId = normalizeToolId(validCall.args.bookmarkId);
+        const targetFolderId = normalizeToolId(validCall.args.targetFolderId);
         const [bookmarkName, folderName] = await Promise.all([
           bookmarkId ? lookupName(bookmarkId) : Promise.resolve(""),
           targetFolderId ? lookupName(targetFolderId) : Promise.resolve(""),
         ]);
-        const summary = buildToolConfirmSummary(tc.name, tc.args, bookmarkName, folderName);
-        const confirmMsg: AiMessage = {
-          role: "tool-confirm",
-          content: summary,
-          at: Date.now(),
-        };
-        setMessages((prev) => [...prev, confirmMsg]);
-        setConfirmToolCall(tc);
-        scrollToBottom();
-        return;
+        validConfirmCalls.push({
+          ...validCall,
+          ...(assistantThinking ? { thinking: assistantThinking } : {}),
+        });
+        summaries.push(buildToolConfirmSummary(validCall.name, validCall.args, bookmarkName, folderName));
       }
+
+      const confirmMsg: AiMessage = {
+        role: "tool-confirm",
+        content: buildBatchToolConfirmSummary(summaries),
+        at: Date.now(),
+      };
+      setMessages((prev) => [...prev, confirmMsg]);
+      setConfirmToolCalls(validConfirmCalls);
+      scrollToBottom();
+      return;
     }
 
-    await executeToolCalls(otherCalls);
+    await executeToolCalls(directCalls, assistantThinking);
   };
 
   /** 执行工具并继续对话 */
-  const executeToolCalls = async (toolCalls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => {
+  const executeToolCalls = async (
+    toolCalls: ToolCallState[],
+    assistantThinking = "",
+  ) => {
     const assistantMsg: AiMessage = {
       role: "assistant",
       content: "",
       toolCalls,
+      ...(assistantThinking ? { thinking: assistantThinking } : {}),
     };
 
     setMessages((prev) => [...prev, assistantMsg]);
@@ -748,49 +874,68 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   };
 
   /** 用户确认执行 */
-  const confirmAndExecute = async () => {
-    if (!confirmToolCall) return;
-    const tc = confirmToolCall;
-    setConfirmToolCall(null);
+  const confirmAndExecute = async (skipSameKind = false) => {
+    if (!confirmToolCalls.length) return;
+    const toolCalls = confirmToolCalls;
+    const assistantThinking = toolCalls.find((tc) => tc.thinking)?.thinking ?? "";
+    if (skipSameKind) {
+      for (const tc of toolCalls) autoConfirmToolNamesRef.current.add(tc.name);
+    }
+    setConfirmToolCalls([]);
     // 将 tool-confirm 消息替换为"执行中"提示
     setMessages((prev) => {
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].role === "tool-confirm") {
           const copy = [...prev];
-          copy[i] = { role: "assistant", content: "正在执行操作…", at: Date.now() };
+          copy[i] = {
+            role: "assistant",
+            content: toolCalls.length > 1 ? `正在执行 ${toolCalls.length} 个操作…` : "正在执行操作…",
+            at: Date.now(),
+          };
           return copy;
         }
       }
       return prev;
     });
-    await executeToolCalls([tc]);
+    await executeToolCalls(toolCalls, assistantThinking);
   };
 
   /** 用户取消操作 */
   const cancelToolCall = () => {
-    if (!confirmToolCall) return;
-    const tc = confirmToolCall;
-    setConfirmToolCall(null);
+    if (!confirmToolCalls.length) return;
+    const toolCalls = confirmToolCalls;
+    const assistantThinking = toolCalls.find((tc) => tc.thinking)?.thinking ?? "";
+    setConfirmToolCalls([]);
     // 将 tool-confirm 消息替换为"已取消"
     setMessages((prev) => {
       for (let i = prev.length - 1; i >= 0; i--) {
         if (prev[i].role === "tool-confirm") {
           const copy = [...prev];
-          copy[i] = { role: "assistant", content: "已取消操作。", at: Date.now() };
+          copy[i] = {
+            role: "assistant",
+            content: toolCalls.length > 1 ? `已取消 ${toolCalls.length} 个操作。` : "已取消操作。",
+            at: Date.now(),
+          };
           return copy;
         }
       }
       return prev;
     });
 
-    const cancelMsg: AiMessage = {
+    const assistantMsg: AiMessage = {
+      role: "assistant",
+      content: "",
+      toolCalls,
+      ...(assistantThinking ? { thinking: assistantThinking } : {}),
+    };
+    const cancelMsgs: AiMessage[] = toolCalls.map((tc) => ({
       role: "tool",
       content: JSON.stringify({ success: false, message: "用户取消了操作" }),
       toolResult: { toolCallId: tc.id, success: false, message: "用户取消了操作" },
-    };
-    setMessages((prev) => [...prev, cancelMsg]);
+    }));
+    setMessages((prev) => [...prev, assistantMsg, ...cancelMsgs]);
     setMessages((prev) => { persist(prev); return prev; });
-    continueChat([...messagesRef.current, cancelMsg], bookmarkCtxRef.current);
+    continueChat([...messagesRef.current, assistantMsg, ...cancelMsgs], bookmarkCtxRef.current);
   };
 
   /* ── 画像/记忆面板 ── */
@@ -867,7 +1012,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       streamingRef.current = true;
       let acc = "";
       let thinkingAcc = "";
+      streamThinkingRef.current = "";
       pendingToolCallsRef.current.clear();
+      pendingToolCallIndexRef.current.clear();
       startPersistTimer(() => acc);
 
       await chat({
@@ -875,8 +1022,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         messages: forApi,
         signal: ctrl.signal,
         tools,
-        onThinking: settings.showThinking ? (delta) => {
+        onThinking: (delta) => {
           thinkingAcc += delta;
+          streamThinkingRef.current = thinkingAcc;
           setMessages((prev) => {
             const copy = [...prev];
             for (let i = copy.length - 1; i >= 0; i--) {
@@ -888,7 +1036,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
             return copy;
           });
           scrollToBottom();
-        } : undefined,
+        },
         onDelta: (d) => {
           acc += d;
           setMessages((prev) => {
@@ -930,6 +1078,11 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       default:
         return `${name}: ${JSON.stringify(args)}`;
     }
+  }
+
+  function buildBatchToolConfirmSummary(summaries: string[]): string {
+    if (summaries.length === 1) return summaries[0];
+    return `将执行 ${summaries.length} 个操作：\n${summaries.map((summary, index) => `${index + 1}. ${summary}`).join("\n")}`;
   }
 
   const stop = () => abortRef.current?.abort();
@@ -1242,12 +1395,15 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                     <div className="mb-2 text-sm font-medium text-foreground/80">
                       {t("ai.toolConfirmTitle")}
                     </div>
-                    <div className="mb-3 text-sm text-foreground/60">
+                    <div className="mb-3 whitespace-pre-line text-sm text-foreground/60">
                       {m.content}
                     </div>
-                    <div className="flex gap-2">
-                      <Button size="sm" onClick={confirmAndExecute}>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" onClick={() => confirmAndExecute()}>
                         {t("ai.toolConfirm")}
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => confirmAndExecute(true)}>
+                        执行并不再确认同类
                       </Button>
                       <Button size="sm" variant="outline" onClick={cancelToolCall}>
                         {t("ai.toolCancel")}
@@ -1297,7 +1453,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                       <LearnResultBlock detail={m.learnDetail} />
                     )}
                     {/* 思考过程折叠块：有 thinking 无 content 时展开（思考中），有 content 后折叠 */}
-                    {!isUser && m.thinking && (
+                    {!isUser && settings.showThinking && m.thinking && (
                       <ThinkingBlock content={m.thinking} expanded={!m.content} />
                     )}
                     {m.content
