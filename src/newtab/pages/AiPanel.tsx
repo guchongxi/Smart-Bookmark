@@ -185,6 +185,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       setMessages(s.messages);
       systemPromptRef.current = s.systemPrompt ?? "";
       autoConfirmToolNamesRef.current.clear();
+      setActivePanel(null);
       scrollToBottom();
     },
     [sessionId, sessions],
@@ -198,6 +199,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     setSessionId(s.id);
     setMessages([]);
     autoConfirmToolNamesRef.current.clear();
+    setActivePanel(null);
   }, []);
 
   /* ── 删除会话 ── */
