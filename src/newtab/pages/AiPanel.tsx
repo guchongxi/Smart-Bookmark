@@ -32,6 +32,7 @@ import {
   PanelLeftOpen,
   User,
   Brain,
+  Terminal,
   X,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
@@ -125,11 +126,12 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   /** 最大工具调用重试次数 */
   const MAX_TOOL_CALL_RETRIES = 3;
 
-  /* ── 画像/记忆面板状态 ── */
-  const [activePanel, setActivePanel] = useState<"profile" | "memory" | null>(null);
+  /* ── 画像/记忆/系统提示词面板状态 ── */
+  const [activePanel, setActivePanel] = useState<"profile" | "memory" | "sys" | null>(null);
   const [profileText, setProfileText] = useState("");
   const [memoryEntries, setMemoryEntries] = useState<string[]>([]);
   const [memoryInput, setMemoryInput] = useState("");
+  const [sysPromptText, setSysPromptText] = useState("");
 
   /** 是否自动滚动到底部（用户上翻时暂停，发新消息时恢复） */
   const autoScrollRef = useRef(true);
@@ -724,8 +726,8 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     continueChat([...messagesRef.current, assistantMsg, ...cancelMsgs], bookmarkCtxRef.current);
   };
 
-  /* ── 画像/记忆面板 ── */
-  const togglePanel = async (panel: "profile" | "memory") => {
+  /* ── 画像/记忆/系统提示词面板 ── */
+  const togglePanel = async (panel: "profile" | "memory" | "sys") => {
     if (activePanel === panel) {
       setActivePanel(null);
       return;
@@ -734,9 +736,13 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     if (panel === "profile") {
       const entries = await getProfile();
       setProfileText(entries.join("\n"));
-    } else {
+    } else if (panel === "memory") {
       const entries = await getMemory();
       setMemoryEntries(entries);
+    } else if (panel === "sys") {
+      // 从 systemPromptRef 或当前会话中读取系统提示词
+      const prompt = systemPromptRef.current || "";
+      setSysPromptText(prompt);
     }
   };
 
@@ -1029,15 +1035,26 @@ export default function AiPanel({ settings }: { settings: Settings }) {
             >
               <Brain className="h-4 w-4 text-muted-foreground" />
             </button>
+            <button
+              type="button"
+              onClick={() => togglePanel("sys")}
+              className={cn(
+                "rounded p-1 transition hover:bg-muted",
+                activePanel === "sys" && "bg-muted",
+              )}
+              title="系统提示词"
+            >
+              <Terminal className="h-4 w-4 text-muted-foreground" />
+            </button>
           </div>
         </header>
         <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 pb-3">
-          {/* ── 画像/记忆编辑面板 ── */}
+          {/* ── 画像/记忆/系统提示词编辑面板 ── */}
           {activePanel && (
             <div className="shrink-0 rounded-lg border p-4" style={{ borderColor: "hsl(var(--claude-rule))" }}>
               <div className="mb-2 flex items-center justify-between">
                 <span className="text-sm font-medium">
-                  {activePanel === "profile" ? t("ai.profile") : t("ai.memory")}
+                  {activePanel === "profile" ? t("ai.profile") : activePanel === "memory" ? t("ai.memory") : "系统提示词"}
                 </span>
                 <button
                   type="button"
@@ -1060,7 +1077,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                     <Button size="sm" onClick={saveProfile}>{t("common.save")}</Button>
                   </div>
                 </div>
-              ) : (
+              ) : activePanel === "memory" ? (
                 <div>
                   <div className="mb-2 max-h-40 space-y-1 overflow-auto">
                     {memoryEntries.length === 0 ? (
@@ -1089,6 +1106,16 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                     />
                     <Button size="sm" onClick={addMemory}>{t("ai.memoryAdd")}</Button>
                   </div>
+                </div>
+              ) : (
+                <div>
+                  {sysPromptText ? (
+                    <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-md border bg-muted/30 p-3 text-xs leading-relaxed" style={{ borderColor: "hsl(var(--claude-rule))", fontFamily: "monospace" }}>
+                      {sysPromptText}
+                    </pre>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">暂无系统提示词（首次发消息后生成）</p>
+                  )}
                 </div>
               )}
             </div>
