@@ -97,7 +97,7 @@ export default function SettingsPage() {
       showThinking: false,
     };
     const nextPresets = [...presets, newPreset];
-    await update({ aiPresets: nextPresets, activeAiPresetId: newPreset.id });
+    await update({ aiPresets: nextPresets });
     setEditingPreset(newPreset);
     setIsDirty(false);
   };
