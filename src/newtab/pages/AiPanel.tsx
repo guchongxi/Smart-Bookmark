@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { chat } from "@/lib/ai";
-import { BOOKMARK_TOOLS_OPENAI, CONFIRM_REQUIRED_TOOLS, type BookmarkToolResult } from "@/lib/aiTools";
-import { getBookmarkContextForAi } from "@/lib/aiBookmarkContext";
+import { runChatStream } from "@/lib/chatSession";
+import { CONFIRM_REQUIRED_TOOLS, type BookmarkToolResult } from "@/lib/aiTools";
+import {
+  executeMemoryTool,
+  executeBackgroundTool,
+  lookupBookmarkName,
+  validateConfirmToolCall,
+  normalizeToolId,
+} from "@/lib/toolExecutor";
+import { buildSystemPrompt } from "@/lib/systemPromptBuilder";
 import { renderMarkdown } from "@/lib/markdown";
 import {
   listSessions,
@@ -35,37 +42,8 @@ import {
   setProfile,
   getMemory,
   setMemory,
-  addProfileEntries,
   addMemoryEntries,
 } from "@/lib/aiUserDb";
-
-const SYSTEM_PROMPT = [
-  "You are Smart Bookmark Agent — an AI agent that works on top of the user's local Chrome bookmarks.",
-  "Your core capabilities:",
-  "- Answer questions grounded in the user's bookmark snapshot (counts, folders, domains, titles).",
-  "- Recommend organization schemes (folders, tags, topics) and point out imbalance.",
-  "- Flag potential duplicates, stale or suspicious URLs, and suggest cleanup.",
-  "- Surface relevant saved links when the user asks about a topic, and propose related sites worth bookmarking.",
-  "- Help craft search queries to find things they already saved.",
-  "A snapshot of the user's bookmarks (counts, folder breakdown, sample titles + URLs) is appended below under '---'. Prefer grounding your answers in it. If the user asks something unrelated to their bookmarks, answer briefly and steer back to what you can do for their collection.",
-  "Style: concise, use bullet points, reply in the user's language (Chinese ↔ English). Never fabricate bookmarks that don't appear in the snapshot.",
-  "",
-  "## 记忆管理",
-  "你有 save_memory 工具，用于持久记住关于用户的信息。当对话中出现以下情况时调用：",
-  "- 用户明确透露身份信息（姓名、职业、角色、语言偏好）→ type: \"profile\"",
-  "- 发现用户的偏好、习惯、行为模式、工作方式 → type: \"memory\"",
-  "- 讨论中产生值得记住的结论或事实 → type: \"memory\"",
-  "规则：",
-  "- 只在有明确新信息时调用，不要为了调用而调用",
-  "- 每条信息一句话，简洁浓缩",
-  "- 如果用户明确要求你记住某事，务必调用",
-  "- 不需要每次都调用，大多数对话不需要触发",
-  "- 保存前先用 list_memory 检查是否已存在相同或相似的条目，避免重复",
-  "你还有记忆管理工具：",
-  "- list_memory：查看当前已保存的画像和记忆，保存前应先调用",
-  "- delete_memory：删除错误或过时的条目",
-  "- update_memory：修改已有条目的内容",
-].join("\n");
 
 type ToolCallState = {
   id: string;
@@ -108,33 +86,6 @@ function relativeTime(ts: number, language: Settings["language"]) {
   );
 }
 
-function normalizeToolId(value: unknown): string {
-  if (typeof value !== "string" && typeof value !== "number") return "";
-  const id = String(value).trim();
-  const invalidIds = new Set(["", "undefined", "null", "nan"]);
-  return invalidIds.has(id.toLowerCase()) ? "" : id;
-}
-
-function validateConfirmToolCall(
-  tc: { id: string; name: string; args: Record<string, unknown> },
-): { ok: true; call: { id: string; name: string; args: Record<string, unknown> } } | { ok: false; missing: string[] } {
-  const bookmarkId = normalizeToolId(tc.args.bookmarkId);
-  const missing: string[] = [];
-  const args = { ...tc.args };
-
-  if (!bookmarkId) missing.push("bookmarkId");
-  else args.bookmarkId = bookmarkId;
-
-  if (tc.name === "move_bookmark") {
-    const targetFolderId = normalizeToolId(tc.args.targetFolderId);
-    if (!targetFolderId) missing.push("targetFolderId");
-    else args.targetFolderId = targetFolderId;
-  }
-
-  if (missing.length) return { ok: false, missing };
-  return { ok: true, call: { ...tc, args } };
-}
-
 export default function AiPanel({ settings }: { settings: Settings }) {
   const t = useT();
 
@@ -169,6 +120,10 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const [confirmToolCalls, setConfirmToolCalls] = useState<ToolCallState[]>([]);
   /** 当前会话内已允许免确认的高风险工具名 */
   const autoConfirmToolNamesRef = useRef<Set<string>>(new Set());
+  /** 工具调用重试计数器，防止无限循环 */
+  const toolCallRetryCountRef = useRef(0);
+  /** 最大工具调用重试次数 */
+  const MAX_TOOL_CALL_RETRIES = 3;
 
   /* ── 画像/记忆面板状态 ── */
   const [activePanel, setActivePanel] = useState<"profile" | "memory" | null>(null);
@@ -416,10 +371,10 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   };
 
   /** 启动持久化定时器 */
-  const startPersistTimer = (getAcc: () => string) => {
+  const startPersistTimer = (check: () => unknown) => {
     if (persistTimerRef.current) clearInterval(persistTimerRef.current);
     persistTimerRef.current = setInterval(() => {
-      if (getAcc()) {
+      if (check()) {
         setMessages((prev) => { persist(prev); return prev; });
       }
     }, 2000);
@@ -445,43 +400,14 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     let systemContent: string;
 
     if (systemPromptRef.current) {
-      // 复用已有的系统提示词（从 session 恢复或之前构建的）
       systemContent = systemPromptRef.current;
     } else {
-      // 首次构建系统提示词
-      const bookmarkCtx = await getBookmarkContextForAi();
+      const { systemContent: built, bookmarkCtx } = await buildSystemPrompt({
+        settings,
+        cachedBookmarkCtx: bookmarkCtxRef.current || null,
+      });
       bookmarkCtxRef.current = bookmarkCtx;
-      const [profileEntries, memoryEntriesData] = await Promise.all([
-        getProfile(),
-        getMemory(),
-      ]);
-
-      let userContext = "";
-      if (profileEntries.length > 0) {
-        userContext += `## 用户画像\n${profileEntries.map((e) => `- ${e}`).join("\n")}`;
-      }
-      if (memoryEntriesData.length > 0) {
-        if (userContext) userContext += "\n\n";
-        userContext += `## 持久记忆\n${memoryEntriesData.map((e) => `- ${e}`).join("\n")}`;
-      }
-
-      systemContent = userContext
-        ? `${SYSTEM_PROMPT}\n\n---\n${bookmarkCtx}\n\n---\n${userContext}`
-        : `${SYSTEM_PROMPT}\n\n---\n${bookmarkCtx}`;
-
-      // 追加 MCP 能力说明
-      const mcpCapabilities: string[] = [];
-      if (settings.mcpWebReader) {
-        mcpCapabilities.push("- web_reader：抓取指定 URL 的网页内容，可用来阅读文章、获取页面信息");
-      }
-      if (settings.mcpWebSearch) {
-        mcpCapabilities.push("- web_search：搜索网络信息，可用来查找最新资讯、验证信息，参数为 search_query");
-      }
-      if (mcpCapabilities.length > 0) {
-        systemContent += "\n\n## 扩展能力\n" + mcpCapabilities.join("\n");
-      }
-
-      // 持久化系统提示词到会话
+      systemContent = built;
       systemPromptRef.current = systemContent;
       if (sessionIdRef.current) {
         updateSession(sessionIdRef.current, [], undefined, systemContent);
@@ -521,61 +447,45 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     abortRef.current = ctrl;
     try {
       streamingRef.current = true;
-      let acc = "";
-      let thinkingAcc = "";
       streamThinkingRef.current = "";
       pendingToolCallsRef.current.clear();
       pendingToolCallIndexRef.current.clear();
-      startPersistTimer(() => acc);
+      toolCallRetryCountRef.current = 0;
+      startPersistTimer(() => messagesRef.current);
 
-      // 动态构建工具列表：根据设置包含 MCP 工具
-      const baseTools = BOOKMARK_TOOLS_OPENAI.filter((t) => {
-        if (t.function.name === "web_reader") return settings.mcpWebReader;
-        if (t.function.name === "web_search") return settings.mcpWebSearch;
-        return true;
-      });
-      const tools = settings.aiProvider === "openai"
-        ? baseTools
-        : baseTools.map((t) => ({
-            name: t.function.name,
-            description: t.function.description,
-            input_schema: t.function.parameters,
-          }));
-      await chat({
+      const result = await runChatStream({
         settings,
         messages: forApi,
         signal: ctrl.signal,
-        tools,
-        onThinking: (delta) => {
-          thinkingAcc += delta;
-          streamThinkingRef.current = thinkingAcc;
-          setMessages((prev) => {
-            const copy = [...prev];
-            for (let i = copy.length - 1; i >= 0; i--) {
-              if (copy[i].role === "assistant") {
-                copy[i] = { ...copy[i], thinking: thinkingAcc };
-                break;
+        callbacks: {
+          onThinking: (delta) => {
+            streamThinkingRef.current += delta;
+            setMessages((prev) => {
+              const copy = [...prev];
+              for (let i = copy.length - 1; i >= 0; i--) {
+                if (copy[i].role === "assistant") {
+                  copy[i] = { ...copy[i], thinking: streamThinkingRef.current };
+                  break;
+                }
               }
-            }
-            return copy;
-          });
-          scrollToBottom();
+              return copy;
+            });
+            scrollToBottom();
+          },
+          onDelta: (d) => {
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              copy[copy.length - 1] = { ...last, content: (last.content || "") + d };
+              return copy;
+            });
+            scrollToBottom();
+          },
+          onToolCall: makeOnToolCall(),
         },
-        onDelta: (d) => {
-          acc += d;
-          setMessages((prev) => {
-            const copy = [...prev];
-            const last = copy[copy.length - 1];
-            copy[copy.length - 1] = { ...last, content: acc };
-            return copy;
-          });
-          scrollToBottom();
-        },
-        onToolCall: makeOnToolCall(),
       });
       if (await checkToolCallsFromStream()) return;
-      // 检查是否实际获得了内容（防止流式中断导致空消息被持久化）
-      if (!acc) {
+      if (!result.text) {
         handleStreamError(new Error("AI 响应中断，请重试"));
         return;
       }
@@ -584,138 +494,6 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       handleStreamError(err);
     } finally {
       cleanupStreaming();
-    }
-  };
-
-  /** 通过 background 执行工具（书签工具或 Web 工具） */
-  const executeTool = async (toolName: string, args: Record<string, unknown>) => {
-    // Web 工具走独立消息类型
-    if (toolName === "web_reader" || toolName === "web_search") {
-      return new Promise<{ ok: boolean; result?: { success: boolean; message: string; data?: unknown }; error?: string }>((resolve) => {
-        chrome.runtime.sendMessage(
-          { type: "execute-mcp-tool", tool: toolName, args },
-          (resp) => resolve(resp),
-        );
-      });
-    }
-    // 书签工具走原有路径
-    return new Promise<{ ok: boolean; result?: { success: boolean; message: string; data?: unknown }; error?: string }>((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: "execute-bookmark-tool", tool: toolName, args },
-        (resp) => resolve(resp),
-      );
-    });
-  };
-
-  /** 查询书签/文件夹名称 */
-  const lookupName = async (id: string): Promise<string> => {
-    return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { type: "lookup-bookmark-name", id },
-        (resp) => resolve(resp?.name ?? id),
-      );
-    });
-  };
-
-  /** 执行 save_memory 工具：直接写入 IndexedDB */
-  const executeSaveMemory = async (args: Record<string, unknown>): Promise<BookmarkToolResult> => {
-    try {
-      const type = args.type as string;
-      const entries = (args.entries as string[]) ?? [];
-
-      if (type === "profile") {
-        await addProfileEntries(entries);
-      } else if (type === "memory") {
-        await addMemoryEntries(entries);
-      } else {
-        return { success: false, message: `未知类型: ${type}` };
-      }
-
-      // 在对话流中插入通知
-      setMessages((prev) => [
-        ...prev,
-        { role: "system", content: `已记住：${entries.join("、")}` },
-      ]);
-
-      return { success: true, message: `已保存 ${entries.length} 条${type === "profile" ? "画像" : "记忆"}信息` };
-    } catch {
-      return { success: false, message: "保存失败" };
-    }
-  };
-
-  /** 执行 list_memory 工具：返回当前画像和记忆 */
-  const executeListMemory = async (): Promise<BookmarkToolResult> => {
-    try {
-      const [profile, memory] = await Promise.all([getProfile(), getMemory()]);
-      const data = { profile, memory };
-      return { success: true, message: JSON.stringify(data), data };
-    } catch {
-      return { success: false, message: "读取失败" };
-    }
-  };
-
-  /** 执行 delete_memory 工具：删除指定条目 */
-  const executeDeleteMemory = async (args: Record<string, unknown>): Promise<BookmarkToolResult> => {
-    try {
-      const type = args.type as string;
-      const entry = args.entry as string;
-
-      if (type === "profile") {
-        const entries = await getProfile();
-        const next = entries.filter((e) => e !== entry);
-        if (next.length === entries.length) return { success: false, message: `未找到条目: ${entry}` };
-        await setProfile(next);
-      } else if (type === "memory") {
-        const entries = await getMemory();
-        const next = entries.filter((e) => e !== entry);
-        if (next.length === entries.length) return { success: false, message: `未找到条目: ${entry}` };
-        await setMemory(next);
-      } else {
-        return { success: false, message: `未知类型: ${type}` };
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "system", content: `已删除：${entry}` },
-      ]);
-
-      return { success: true, message: `已删除 ${type === "profile" ? "画像" : "记忆"}条目` };
-    } catch {
-      return { success: false, message: "删除失败" };
-    }
-  };
-
-  /** 执行 update_memory 工具：修改指定条目 */
-  const executeUpdateMemory = async (args: Record<string, unknown>): Promise<BookmarkToolResult> => {
-    try {
-      const type = args.type as string;
-      const oldEntry = args.old_entry as string;
-      const newEntry = args.new_entry as string;
-
-      if (type === "profile") {
-        const entries = await getProfile();
-        const idx = entries.indexOf(oldEntry);
-        if (idx === -1) return { success: false, message: `未找到条目: ${oldEntry}` };
-        entries[idx] = newEntry;
-        await setProfile(entries);
-      } else if (type === "memory") {
-        const entries = await getMemory();
-        const idx = entries.indexOf(oldEntry);
-        if (idx === -1) return { success: false, message: `未找到条目: ${oldEntry}` };
-        entries[idx] = newEntry;
-        await setMemory(entries);
-      } else {
-        return { success: false, message: `未知类型: ${type}` };
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        { role: "system", content: `已修改：${oldEntry} → ${newEntry}` },
-      ]);
-
-      return { success: true, message: `已修改${type === "profile" ? "画像" : "记忆"}条目` };
-    } catch {
-      return { success: false, message: "修改失败" };
     }
   };
 
@@ -737,14 +515,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     const memoryConversationAdditions: AiMessage[] = [];
 
     for (const tc of memoryCalls) {
-      let result: BookmarkToolResult;
-      switch (tc.name) {
-        case "save_memory": result = await executeSaveMemory(tc.args); break;
-        case "list_memory": result = await executeListMemory(); break;
-        case "delete_memory": result = await executeDeleteMemory(tc.args); break;
-        case "update_memory": result = await executeUpdateMemory(tc.args); break;
-        default: result = { success: false, message: "未知工具" };
-      }
+      const result = await executeMemoryTool(tc.name, tc.args);
       const assistantMsg: AiMessage = {
         role: "assistant",
         content: "",
@@ -818,8 +589,8 @@ export default function AiPanel({ settings }: { settings: Settings }) {
         const bookmarkId = normalizeToolId(validCall.args.bookmarkId);
         const targetFolderId = normalizeToolId(validCall.args.targetFolderId);
         const [bookmarkName, folderName] = await Promise.all([
-          bookmarkId ? lookupName(bookmarkId) : Promise.resolve(""),
-          targetFolderId ? lookupName(targetFolderId) : Promise.resolve(""),
+          bookmarkId ? lookupBookmarkName(bookmarkId) : Promise.resolve(""),
+          targetFolderId ? lookupBookmarkName(targetFolderId) : Promise.resolve(""),
         ]);
         validConfirmCalls.push({
           ...validCall,
@@ -847,6 +618,21 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     toolCalls: ToolCallState[],
     assistantThinking = "",
   ) => {
+    // 检查重试次数，防止无限循环
+    if (toolCallRetryCountRef.current >= MAX_TOOL_CALL_RETRIES) {
+      toolCallRetryCountRef.current = 0;
+      const errorMsg: AiMessage = {
+        role: "assistant",
+        content: "⚠️ 工具调用多次失败，已自动停止。请检查工具配置或稍后重试。",
+        at: Date.now(),
+      };
+      setMessages((prev) => [...prev, errorMsg]);
+      setMessages((prev) => { persist(prev); return prev; });
+      setLoading(false);
+      return;
+    }
+    toolCallRetryCountRef.current++;
+
     const assistantMsg: AiMessage = {
       role: "assistant",
       content: "",
@@ -858,7 +644,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
 
     const toolResults: AiMessage[] = [];
     for (const tc of toolCalls) {
-      const resp = await executeTool(tc.name, tc.args);
+      const resp = await executeBackgroundTool(tc.name, tc.args);
       const result = resp?.result ?? { success: false, message: resp?.error ?? "执行失败" };
       toolResults.push({
         role: "tool",
@@ -987,20 +773,6 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       ...conversationHistory,
     ];
 
-    // 动态构建工具列表：根据设置过滤 MCP 工具（与 send() 保持一致）
-    const baseTools = BOOKMARK_TOOLS_OPENAI.filter((t) => {
-      if (t.function.name === "web_reader") return settings.mcpWebReader;
-      if (t.function.name === "web_search") return settings.mcpWebSearch;
-      return true;
-    });
-    const tools = settings.aiProvider === "openai"
-      ? baseTools
-      : baseTools.map((t) => ({
-          name: t.function.name,
-          description: t.function.description,
-          input_schema: t.function.parameters,
-        }));
-
     setLoading(true);
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -1010,52 +782,50 @@ export default function AiPanel({ settings }: { settings: Settings }) {
 
     try {
       streamingRef.current = true;
-      let acc = "";
-      let thinkingAcc = "";
       streamThinkingRef.current = "";
       pendingToolCallsRef.current.clear();
       pendingToolCallIndexRef.current.clear();
-      startPersistTimer(() => acc);
+      startPersistTimer(() => messagesRef.current);
 
-      await chat({
+      const result = await runChatStream({
         settings,
         messages: forApi,
         signal: ctrl.signal,
-        tools,
-        onThinking: (delta) => {
-          thinkingAcc += delta;
-          streamThinkingRef.current = thinkingAcc;
-          setMessages((prev) => {
-            const copy = [...prev];
-            for (let i = copy.length - 1; i >= 0; i--) {
-              if (copy[i].role === "assistant") {
-                copy[i] = { ...copy[i], thinking: thinkingAcc };
-                break;
+        callbacks: {
+          onThinking: (delta) => {
+            streamThinkingRef.current += delta;
+            setMessages((prev) => {
+              const copy = [...prev];
+              for (let i = copy.length - 1; i >= 0; i--) {
+                if (copy[i].role === "assistant") {
+                  copy[i] = { ...copy[i], thinking: streamThinkingRef.current };
+                  break;
+                }
               }
-            }
-            return copy;
-          });
-          scrollToBottom();
+              return copy;
+            });
+            scrollToBottom();
+          },
+          onDelta: (d) => {
+            setMessages((prev) => {
+              const copy = [...prev];
+              const last = copy[copy.length - 1];
+              copy[copy.length - 1] = { ...last, content: (last.content || "") + d };
+              return copy;
+            });
+            scrollToBottom();
+          },
+          onToolCall: makeOnToolCall(),
         },
-        onDelta: (d) => {
-          acc += d;
-          setMessages((prev) => {
-            const copy = [...prev];
-            const last = copy[copy.length - 1];
-            copy[copy.length - 1] = { ...last, content: acc };
-            return copy;
-          });
-          scrollToBottom();
-        },
-        onToolCall: makeOnToolCall(),
       });
 
       if (await checkToolCallsFromStream()) return;
-      // 检查是否实际获得了内容（防止流式中断导致空消息被持久化）
-      if (!acc) {
+      if (!result.text) {
         handleStreamError(new Error("AI 响应中断，请重试"));
         return;
       }
+      // 对话正常返回文本，重置重试计数器
+      toolCallRetryCountRef.current = 0;
       setMessages((prev) => { persist(prev); return prev; });
     } catch (err: any) {
       handleStreamError(err);
