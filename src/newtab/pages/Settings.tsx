@@ -35,7 +35,26 @@ export default function SettingsPage() {
   const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
-    getSettings().then(setS);
+    getSettings().then((loaded) => {
+      // 迁移旧配置：如果没有预设但有已配置的 AI，自动转为预设
+      if ((!loaded.aiPresets || loaded.aiPresets.length === 0) && loaded.aiProvider !== "none" && loaded.aiApiKey) {
+        const migrated: AiPreset = {
+          id: crypto.randomUUID(),
+          name: "默认配置",
+          provider: loaded.aiProvider as AiPreset["provider"],
+          model: loaded.aiModel || "",
+          apiKey: loaded.aiApiKey,
+          baseUrl: loaded.aiBaseUrl || "",
+          mcpWebReader: loaded.mcpWebReader,
+          mcpWebSearch: loaded.mcpWebSearch,
+          showThinking: loaded.showThinking,
+        };
+        const patched = { ...loaded, aiPresets: [migrated], activeAiPresetId: migrated.id };
+        setSettings(patched).then(setS);
+      } else {
+        setS(loaded);
+      }
+    });
   }, []);
 
   if (!s) return null;
