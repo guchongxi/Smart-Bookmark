@@ -174,8 +174,6 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const switchPreset = async (presetId: string) => {
     await setSettings({ activeAiPresetId: presetId });
     setPresetDropdownOpen(false);
-    // 清空系统提示词缓存，下次发消息时重新构建
-    systemPromptRef.current = "";
     toast("已切换 AI 配置", "success");
   };
 
