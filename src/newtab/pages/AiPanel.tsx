@@ -952,8 +952,8 @@ export default function AiPanel({ settings }: { settings: Settings }) {
       )}
 
       {/* ── 右侧聊天区 ── */}
-      <div className="flex flex-1 flex-col">
-        <header className="mb-3 flex items-center justify-between gap-3 px-4 pt-3">
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <header className="mb-3 flex shrink-0 items-center justify-between gap-3 px-4 pt-3">
           <div className="flex items-center gap-2">
             {!sidebarOpen && (
               <button
