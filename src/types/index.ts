@@ -88,6 +88,19 @@ export interface CustomEngine {
   icon?: string;
 }
 
+/** AI 配置预设 */
+export interface AiPreset {
+  id: string;
+  name: string;
+  provider: "openai" | "anthropic";
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+  mcpWebReader?: boolean;
+  mcpWebSearch?: boolean;
+  showThinking?: boolean;
+}
+
 export interface Settings {
   theme: "system" | "light" | "dark";
   accentPreset: AccentPreset;
@@ -106,6 +119,10 @@ export interface Settings {
   mcpWebSearch?: boolean;
   /** 是否启用 AI 思考内容展示 */
   showThinking?: boolean;
+  /** AI 配置预设列表 */
+  aiPresets?: AiPreset[];
+  /** 当前激活的 AI 配置预设 ID */
+  activeAiPresetId?: string;
   cardDensity: "comfy" | "compact";
   language: Language;
   compareEngines: string[];

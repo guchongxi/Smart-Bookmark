@@ -4,11 +4,11 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { getSettings, setSettings } from "@/lib/storage";
-import type { AccentPreset, Settings, ThemePreset } from "@/types";
+import type { AccentPreset, AiPreset, Settings, ThemePreset } from "@/types";
 import { useT } from "@/lib/i18n";
 import { testAi } from "@/lib/ai";
 import { BUILTIN_ENGINES, faviconFor } from "@/lib/engines";
-import { Check, CheckCircle2, XCircle, Loader2, Flame, ExternalLink, Globe } from "lucide-react";
+import { Check, CheckCircle2, XCircle, Loader2, Flame, ExternalLink, Globe, Plus, Trash2, Copy, Settings2 } from "lucide-react";
 import { COMMON_LANGUAGES, clearTrendingCache } from "@/lib/github";
 import { HOME_WIDGETS } from "@/lib/homeWidgets";
 import { clearAllNoIconCache } from "@/lib/favicon";
@@ -29,6 +29,10 @@ export default function SettingsPage() {
     message: string;
   } | null>(null);
   const [testing, setTesting] = useState(false);
+
+  /* ── AI 预设管理状态 ── */
+  const [editingPreset, setEditingPreset] = useState<AiPreset | null>(null);
+  const [isDirty, setIsDirty] = useState(false);
 
   useEffect(() => {
     getSettings().then(setS);
@@ -54,6 +58,70 @@ export default function SettingsPage() {
     const r = await testAi(s);
     setTestResult(r);
     setTesting(false);
+  };
+
+  /* ── AI 预设操作 ── */
+  const presets = s.aiPresets ?? [];
+  const activePresetId = s.activeAiPresetId;
+
+  const createPreset = async () => {
+    const newPreset: AiPreset = {
+      id: crypto.randomUUID(),
+      name: `配置 ${presets.length + 1}`,
+      provider: "openai",
+      model: "gpt-4o-mini",
+      apiKey: "",
+      baseUrl: "",
+      mcpWebReader: false,
+      mcpWebSearch: false,
+      showThinking: false,
+    };
+    const nextPresets = [...presets, newPreset];
+    await update({ aiPresets: nextPresets, activeAiPresetId: newPreset.id });
+    setEditingPreset(newPreset);
+    setIsDirty(false);
+  };
+
+  const deletePreset = async (id: string) => {
+    const nextPresets = presets.filter(p => p.id !== id);
+    const nextActiveId = activePresetId === id
+      ? (nextPresets[0]?.id ?? undefined)
+      : activePresetId;
+    await update({ aiPresets: nextPresets, activeAiPresetId: nextActiveId });
+    if (editingPreset?.id === id) {
+      setEditingPreset(null);
+      setIsDirty(false);
+    }
+  };
+
+  const activatePreset = async (id: string) => {
+    await update({ activeAiPresetId: id });
+  };
+
+  const savePreset = async () => {
+    if (!editingPreset) return;
+    const nextPresets = presets.map(p =>
+      p.id === editingPreset.id ? editingPreset : p
+    );
+    await update({ aiPresets: nextPresets });
+    setIsDirty(false);
+    toast("配置已保存", "success");
+  };
+
+  const updateEditingPreset = (patch: Partial<AiPreset>) => {
+    if (!editingPreset) return;
+    setEditingPreset({ ...editingPreset, ...patch });
+    setIsDirty(true);
+  };
+
+  const duplicatePreset = async (preset: AiPreset) => {
+    const newPreset: AiPreset = {
+      ...preset,
+      id: crypto.randomUUID(),
+      name: `${preset.name} (副本)`,
+    };
+    const nextPresets = [...presets, newPreset];
+    await update({ aiPresets: nextPresets });
   };
 
   return (
@@ -327,106 +395,249 @@ export default function SettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("settings.ai")}</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5" />
+            {t("settings.ai")}
+          </CardTitle>
+          <CardDescription>
+            支持多套 AI 配置，可随时切换
+          </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <Row label={t("settings.provider")}>
-            <div className="flex gap-2">
-              {(
-                [
-                  ["none", t("settings.providerNone")],
-                  ["openai", "OpenAI"],
-                  ["anthropic", "Anthropic"],
-                ] as const
-              ).map(([v, label]) => (
-                <Button
-                  key={v}
-                  size="sm"
-                  variant={s.aiProvider === v ? "default" : "outline"}
-                  onClick={() =>
-                    update({ aiProvider: v as Settings["aiProvider"] })
-                  }
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-          </Row>
-          <Row label={t("settings.model")}>
-            <Input
-              value={s.aiModel}
-              placeholder="gpt-4o-mini / claude-3-5-sonnet-latest / deepseek-chat / moonshot-v1-8k"
-              onChange={(e) => update({ aiModel: e.target.value })}
-            />
-          </Row>
-          <Row label="Base URL">
-            <Input
-              value={s.aiBaseUrl}
-              placeholder={
-                s.aiProvider === "anthropic"
-                  ? "https://api.anthropic.com（留空用默认）"
-                  : "https://api.openai.com/v1（留空用默认，可填 DeepSeek/Kimi/自建代理等 OpenAI 兼容地址）"
-              }
-              onChange={(e) => update({ aiBaseUrl: e.target.value })}
-            />
-          </Row>
-          <Row label={t("settings.apiKey")}>
-            <Input
-              type="password"
-              value={s.aiApiKey}
-              placeholder={t("settings.apiKeyPh")}
-              onChange={(e) => update({ aiApiKey: e.target.value })}
-            />
-          </Row>
-          <Row label="连通性">
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onTestAi}
-                disabled={testing || s.aiProvider === "none" || !s.aiApiKey}
-                className="gap-2"
-              >
-                {testing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                )}
-                测试连接
+        <CardContent className="space-y-6">
+          {/* 配置列表 */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">配置列表</span>
+              <Button size="sm" variant="outline" onClick={createPreset} className="gap-1.5">
+                <Plus className="h-3.5 w-3.5" />
+                新增配置
               </Button>
-              {testResult && (
-                <span
-                  className={
-                    "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs " +
-                    (testResult.ok
-                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                      : "bg-destructive/10 text-destructive")
+            </div>
+
+            {presets.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                暂无 AI 配置，点击「新增配置」创建第一套
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {presets.map((preset) => {
+                  const isActive = preset.id === activePresetId;
+                  const isEditing = preset.id === editingPreset?.id;
+                  return (
+                    <div
+                      key={preset.id}
+                      className={cn(
+                        "flex items-center gap-3 rounded-lg border p-3 transition",
+                        isActive ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50",
+                        isEditing && "ring-2 ring-primary/30",
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{preset.name}</span>
+                          {isActive && (
+                            <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                              使用中
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {preset.provider} · {preset.model || "未设置模型"}
+                          {preset.apiKey ? " · ✓ 已配置 Key" : " · ✗ 未配置 Key"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {!isActive && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => activatePreset(preset.id)}
+                            className="h-7 text-xs"
+                          >
+                            切换
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant={isEditing ? "default" : "ghost"}
+                          onClick={() => {
+                            setEditingPreset(isEditing ? null : preset);
+                            setIsDirty(false);
+                          }}
+                          className="h-7 text-xs"
+                        >
+                          {isEditing ? "收起" : "编辑"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => duplicatePreset(preset)}
+                          className="h-7 px-1.5"
+                          title="复制"
+                        >
+                          <Copy className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            if (confirm(`确定删除配置「${preset.name}」？`)) {
+                              deletePreset(preset.id);
+                            }
+                          }}
+                          className="h-7 px-1.5 text-destructive hover:text-destructive"
+                          title="删除"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* 编辑面板 */}
+          {editingPreset && (
+            <div className="space-y-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">编辑配置</span>
+                {isDirty && (
+                  <span className="text-xs text-amber-500">有未保存的修改</span>
+                )}
+              </div>
+
+              <Row label="名称">
+                <Input
+                  value={editingPreset.name}
+                  onChange={(e) => updateEditingPreset({ name: e.target.value })}
+                  placeholder="配置名称"
+                />
+              </Row>
+
+              <Row label={t("settings.provider")}>
+                <div className="flex gap-2">
+                  {(
+                    [
+                      ["openai", "OpenAI"],
+                      ["anthropic", "Anthropic"],
+                    ] as const
+                  ).map(([v, label]) => (
+                    <Button
+                      key={v}
+                      size="sm"
+                      variant={editingPreset.provider === v ? "default" : "outline"}
+                      onClick={() => updateEditingPreset({ provider: v })}
+                    >
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              </Row>
+
+              <Row label={t("settings.model")}>
+                <Input
+                  value={editingPreset.model}
+                  placeholder="gpt-4o-mini / claude-3-5-sonnet-latest / deepseek-chat"
+                  onChange={(e) => updateEditingPreset({ model: e.target.value })}
+                />
+              </Row>
+
+              <Row label="Base URL">
+                <Input
+                  value={editingPreset.baseUrl}
+                  placeholder={
+                    editingPreset.provider === "anthropic"
+                      ? "https://api.anthropic.com（留空用默认）"
+                      : "https://api.openai.com/v1（留空用默认）"
                   }
-                >
-                  {testResult.ok ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : (
-                    <XCircle className="h-3.5 w-3.5" />
-                  )}
-                  {testResult.ok ? "成功" : "失败"} · {testResult.latencyMs}ms
-                  <span className="max-w-[240px] truncate opacity-80">
-                    · {testResult.message}
+                  onChange={(e) => updateEditingPreset({ baseUrl: e.target.value })}
+                />
+              </Row>
+
+              <Row label={t("settings.apiKey")}>
+                <Input
+                  type="password"
+                  value={editingPreset.apiKey}
+                  placeholder={t("settings.apiKeyPh")}
+                  onChange={(e) => updateEditingPreset({ apiKey: e.target.value })}
+                />
+              </Row>
+
+              <Row label={t("settings.showThinking")}>
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={editingPreset.showThinking ?? false}
+                    onCheckedChange={(v) => updateEditingPreset({ showThinking: v })}
+                  />
+                  <span className="text-xs text-muted-foreground">
+                    {t("settings.showThinkingHint")}
                   </span>
-                </span>
-              )}
+                </div>
+              </Row>
+
+              <Row label="连通性">
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={onTestAi}
+                    disabled={testing || !editingPreset.apiKey}
+                    className="gap-2"
+                  >
+                    {testing ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    )}
+                    测试连接
+                  </Button>
+                  {testResult && (
+                    <span
+                      className={
+                        "flex items-center gap-1 rounded-full px-2.5 py-1 text-xs " +
+                        (testResult.ok
+                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                          : "bg-destructive/10 text-destructive")
+                      }
+                    >
+                      {testResult.ok ? (
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                      ) : (
+                        <XCircle className="h-3.5 w-3.5" />
+                      )}
+                      {testResult.ok ? "成功" : "失败"} · {testResult.latencyMs}ms
+                      <span className="max-w-[240px] truncate opacity-80">
+                        · {testResult.message}
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </Row>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingPreset(null);
+                    setIsDirty(false);
+                  }}
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={savePreset}
+                  disabled={!isDirty}
+                >
+                  保存配置
+                </Button>
+              </div>
             </div>
-          </Row>
-          <Row label={t("settings.showThinking")}>
-            <div className="flex items-center gap-3">
-              <Switch
-                checked={s.showThinking ?? false}
-                onCheckedChange={(v) => update({ showThinking: v })}
-              />
-              <span className="text-xs text-muted-foreground">
-                {t("settings.showThinkingHint")}
-              </span>
-            </div>
-          </Row>
+          )}
+
           <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
             {t("settings.apiKeyNotice")} OpenAI 兼容接口（DeepSeek/Moonshot Kimi/LM Studio/Ollama 等）可通过自定义 Base URL 使用。
           </div>

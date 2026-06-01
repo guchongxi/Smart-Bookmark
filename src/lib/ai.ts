@@ -1,10 +1,12 @@
 import type { AiMessage, Settings } from "@/types";
 import { sanitizeToolMessageHistory } from "@/lib/aiMessageHistory";
+import { getActiveAiConfig } from "@/lib/aiConfig";
 
 function toApiMessages(
   messages: AiMessage[],
-  options: { stripAssistantWithoutThinking?: boolean } = {},
+  options: { stripAssistantWithoutThinking?: boolean; provider?: "openai" | "anthropic" } = {},
 ) {
+  const provider = options.provider ?? "openai";
   const result: unknown[] = [];
   const sanitizedMessages = sanitizeToolMessageHistory(messages);
   const skippedToolCallIds = new Set<string>();
@@ -12,39 +14,51 @@ function toApiMessages(
     if (m.role === "tool") {
       const toolCallId = m.toolResult?.toolCallId ?? "";
       if (skippedToolCallIds.has(toolCallId)) continue;
-      result.push({
-        role: "tool",
-        tool_call_id: toolCallId,
-        content: m.content,
-      });
+      if (provider === "anthropic") {
+        result.push({
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: toolCallId, content: m.content }],
+        });
+      } else {
+        result.push({ role: "tool", tool_call_id: toolCallId, content: m.content });
+      }
     } else if (m.role === "assistant" && m.toolCalls?.length) {
       if (options.stripAssistantWithoutThinking && !m.thinking) {
         for (const toolCall of m.toolCalls) skippedToolCallIds.add(toolCall.id);
         continue;
       }
-      const assistantMessage: Record<string, unknown> = {
-        role: "assistant",
-        content: m.content || null,
-        tool_calls: m.toolCalls.map((tc) => ({
-          id: tc.id,
-          type: "function",
-          function: {
-            name: tc.name,
-            arguments: JSON.stringify(tc.args),
-          },
-        })),
-      };
-      if (m.thinking) assistantMessage.reasoning_content = m.thinking;
-      result.push(assistantMessage);
+      if (provider === "anthropic") {
+        const content: unknown[] = [];
+        if (m.thinking) content.push({ type: "thinking", thinking: m.thinking });
+        if (m.content) content.push({ type: "text", text: m.content });
+        for (const tc of m.toolCalls) {
+          content.push({ type: "tool_use", id: tc.id, name: tc.name, input: tc.args });
+        }
+        result.push({ role: "assistant", content });
+      } else {
+        const assistantMessage: Record<string, unknown> = {
+          role: "assistant",
+          content: m.content || null,
+          tool_calls: m.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function",
+            function: { name: tc.name, arguments: JSON.stringify(tc.args) },
+          })),
+        };
+        if (m.thinking) assistantMessage.reasoning_content = m.thinking;
+        result.push(assistantMessage);
+      }
     } else if (m.role !== "system" && m.role !== "tool-confirm") {
       if (options.stripAssistantWithoutThinking && m.role === "assistant" && !m.thinking) {
         continue;
       }
-      const apiMessage: Record<string, unknown> = { role: m.role, content: m.content };
-      if (m.role === "assistant" && m.thinking) {
-        apiMessage.reasoning_content = m.thinking;
+      if (provider === "anthropic") {
+        result.push({ role: m.role, content: m.content });
+      } else {
+        const apiMessage: Record<string, unknown> = { role: m.role, content: m.content };
+        if (m.role === "assistant" && m.thinking) apiMessage.reasoning_content = m.thinking;
+        result.push(apiMessage);
       }
-      result.push(apiMessage);
     }
   }
   return result;
@@ -69,20 +83,22 @@ export interface ChatOptions {
 }
 
 export async function chat({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
-  if (settings.aiProvider === "openai") return chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onThinking, tools });
-  if (settings.aiProvider === "anthropic") return chatAnthropic({ settings, messages, signal, onDelta, onToolCall, onThinking, tools });
+  const aiConfig = getActiveAiConfig(settings);
+  if (aiConfig.provider === "openai") return chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onThinking, tools });
+  if (aiConfig.provider === "anthropic") return chatAnthropic({ settings, messages, signal, onDelta, onToolCall, onThinking, tools });
   throw new Error("AI 未启用，请在设置中配置 Provider 与 API Key。");
 }
 
 async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
-  if (!settings.aiApiKey) throw new Error("缺少 OpenAI API Key");
-  const base = (settings.aiBaseUrl || "https://api.openai.com/v1").replace(
+  const aiConfig = getActiveAiConfig(settings);
+  if (!aiConfig.apiKey) throw new Error("缺少 OpenAI API Key");
+  const base = (aiConfig.baseUrl || "https://api.openai.com/v1").replace(
     /\/+$/,
     "",
   );
   const request = (apiMessages: unknown[]) => {
     const body: Record<string, unknown> = {
-      model: settings.aiModel || "gpt-4o-mini",
+      model: aiConfig.model || "gpt-4o-mini",
       messages: apiMessages,
       stream: true,
     };
@@ -93,7 +109,7 @@ async function chatOpenAI({ settings, messages, signal, onDelta, onToolCall, onT
       signal,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.aiApiKey}`,
+        Authorization: `Bearer ${aiConfig.apiKey}`,
       },
       body: JSON.stringify(body),
     });
@@ -160,45 +176,18 @@ async function readOpenAiStream(
 }
 
 async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, onThinking, tools }: ChatOptions): Promise<string> {
-  if (!settings.aiApiKey) throw new Error("缺少 Anthropic API Key");
+  const aiConfig = getActiveAiConfig(settings);
+  if (!aiConfig.apiKey) throw new Error("缺少 Anthropic API Key");
   const sys = messages.find((m) => m.role === "system")?.content ?? "";
-  const rest = messages.filter((m) => m.role !== "system");
-  const base = (settings.aiBaseUrl || "https://api.anthropic.com").replace(
+  const base = (aiConfig.baseUrl || "https://api.anthropic.com").replace(
     /\/+$/,
     "",
   );
 
-  // 转换 tool 结果为 Anthropic content 格式
-  const apiMessages: unknown[] = [];
-  for (const m of rest) {
-    if (m.role === "tool") {
-      apiMessages.push({
-        role: "user",
-        content: [{
-          type: "tool_result",
-          tool_use_id: m.toolResult?.toolCallId ?? "",
-          content: m.content,
-        }],
-      });
-    } else if (m.role === "assistant" && m.toolCalls?.length) {
-      const content: unknown[] = [];
-      if (m.content) content.push({ type: "text", text: m.content });
-      for (const tc of m.toolCalls) {
-        content.push({
-          type: "tool_use",
-          id: tc.id,
-          name: tc.name,
-          input: tc.args,
-        });
-      }
-      apiMessages.push({ role: "assistant", content });
-    } else if (m.role !== "tool-confirm") {
-      apiMessages.push({ role: m.role, content: m.content });
-    }
-  }
+  const apiMessages = toApiMessages(messages, { provider: "anthropic" });
 
   const body: Record<string, unknown> = {
-    model: settings.aiModel || "claude-3-5-sonnet-latest",
+    model: aiConfig.model || "claude-3-5-sonnet-latest",
     max_tokens: 1024,
     system: sys || undefined,
     messages: apiMessages,
@@ -206,7 +195,7 @@ async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, 
   };
   if (tools?.length) body.tools = tools;
 
-  if (settings.showThinking) {
+  if (aiConfig.showThinking) {
     body.thinking = { type: "enabled", budget_tokens: 10000 };
   }
 
@@ -215,7 +204,7 @@ async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, 
     signal,
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": settings.aiApiKey,
+      "x-api-key": aiConfig.apiKey,
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
@@ -286,10 +275,11 @@ export async function testAi(settings: Settings): Promise<{
   message: string;
 }> {
   const start = performance.now();
+  const aiConfig = getActiveAiConfig(settings);
   try {
-    if (settings.aiProvider === "openai") {
-      if (!settings.aiApiKey) throw new Error("缺少 API Key");
-      const base = (settings.aiBaseUrl || "https://api.openai.com/v1").replace(
+    if (aiConfig.provider === "openai") {
+      if (!aiConfig.apiKey) throw new Error("缺少 API Key");
+      const base = (aiConfig.baseUrl || "https://api.openai.com/v1").replace(
         /\/+$/,
         "",
       );
@@ -297,10 +287,10 @@ export async function testAi(settings: Settings): Promise<{
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${settings.aiApiKey}`,
+          Authorization: `Bearer ${aiConfig.apiKey}`,
         },
         body: JSON.stringify({
-          model: settings.aiModel || "gpt-4o-mini",
+          model: aiConfig.model || "gpt-4o-mini",
           max_tokens: 8,
           messages: [
             { role: "user", content: "ping" },
@@ -325,9 +315,9 @@ export async function testAi(settings: Settings): Promise<{
         "(空响应)";
       return { ok: true, latencyMs: ms, message: String(txt).slice(0, 80) };
     }
-    if (settings.aiProvider === "anthropic") {
-      if (!settings.aiApiKey) throw new Error("缺少 API Key");
-      const base = (settings.aiBaseUrl || "https://api.anthropic.com").replace(
+    if (aiConfig.provider === "anthropic") {
+      if (!aiConfig.apiKey) throw new Error("缺少 API Key");
+      const base = (aiConfig.baseUrl || "https://api.anthropic.com").replace(
         /\/+$/,
         "",
       );
@@ -335,12 +325,12 @@ export async function testAi(settings: Settings): Promise<{
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": settings.aiApiKey,
+          "x-api-key": aiConfig.apiKey,
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true",
         },
         body: JSON.stringify({
-          model: settings.aiModel || "claude-3-5-sonnet-latest",
+          model: aiConfig.model || "claude-3-5-sonnet-latest",
           max_tokens: 8,
           messages: [{ role: "user", content: "ping" }],
         }),

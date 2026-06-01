@@ -20,6 +20,7 @@ import {
 } from "@/lib/aiSessionDb";
 import type { AiMessage, AiSession, Settings } from "@/types";
 import { cn } from "@/lib/utils";
+import { getActiveAiConfig } from "@/lib/aiConfig";
 import {
   Send,
   Sparkles,
@@ -89,6 +90,7 @@ function relativeTime(ts: number, language: Settings["language"]) {
 
 export default function AiPanel({ settings }: { settings: Settings }) {
   const t = useT();
+  const aiConfig = getActiveAiConfig(settings);
 
   /* ── 会话状态 ── */
   const [sessions, setSessions] = useState<AiSession[]>([]);
@@ -293,9 +295,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   // 每次渲染同步 messages 到 ref，确保异步回调中能读到最新值
   messagesRef.current = messages;
   const modelLine =
-    settings.aiProvider === "none"
+    aiConfig.provider === "none"
       ? t("ai.disabled")
-      : `${settings.aiProvider} · ${settings.aiModel}`;
+      : `${aiConfig.provider} · ${aiConfig.model}`;
 
   /** 构造 onToolCall 回调，累积流式 tool call 参数 */
   const makeOnToolCall = () => (call: import("@/lib/ai").ToolCallDelta) => {
@@ -388,7 +390,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     const text = (override ?? input).trim();
     if (!text) return;
     setConfirmToolCalls([]);
-    if (settings.aiProvider === "none" || !settings.aiApiKey) {
+    if (aiConfig.provider === "none" || !aiConfig.apiKey) {
       alert(t("ai.needKey"));
       return;
     }
@@ -864,7 +866,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   }
 
   const stop = () => abortRef.current?.abort();
-  const isAiLive = settings.aiProvider !== "none";
+  const isAiLive = aiConfig.provider !== "none";
 
   return (
     <div className="mx-auto flex h-[calc(100vh-10rem)] w-full max-w-5xl gap-0 overflow-hidden rounded-lg border"
@@ -1234,7 +1236,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                         {formatMsgTime(m.at, settings.language)}
                       </time>
                     )}
-                    {!isUser && settings.aiProvider !== "none" && (
+                    {!isUser && aiConfig.provider !== "none" && (
                       <span className="rounded-md bg-background/60 px-1.5 py-0 font-mono text-[10px]">
                         {modelLine}
                       </span>
@@ -1252,7 +1254,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                       <LearnResultBlock detail={m.learnDetail} />
                     )}
                     {/* 思考过程折叠块：有 thinking 无 content 时展开（思考中），有 content 后折叠 */}
-                    {!isUser && settings.showThinking && m.thinking && (
+                    {!isUser && aiConfig.showThinking && m.thinking && (
                       <ThinkingBlock content={m.thinking} expanded={!m.content} />
                     )}
                     {m.content

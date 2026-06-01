@@ -2,6 +2,7 @@ export {};
 
 import { fetchWebPage, searchWeb } from "@/lib/webTools";
 import { getSettings } from "@/lib/storage";
+import type { BookmarkToolResult } from "@/lib/aiTools";
 
 const MENU_IDS = {
   SEARCH_BOOKMARKS: "sb-search-bookmarks",
@@ -32,7 +33,7 @@ chrome.bookmarks.onMoved.addListener(onBookmarkChanged);
 async function executeBookmarkTool(
   tool: string,
   args: Record<string, unknown>,
-): Promise<{ success: boolean; message: string; data?: unknown }> {
+): Promise<BookmarkToolResult> {
   switch (tool) {
     case "search_bookmarks": {
       const query = String(args.query ?? "").toLowerCase();

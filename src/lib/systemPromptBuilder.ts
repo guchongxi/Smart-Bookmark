@@ -5,6 +5,7 @@
 
 import { getBookmarkContextForAi } from "@/lib/aiBookmarkContext";
 import { getProfile, getMemory } from "@/lib/aiUserDb";
+import { getActiveAiConfig } from "@/lib/aiConfig";
 import type { Settings } from "@/types";
 
 const SYSTEM_PROMPT = [
@@ -52,6 +53,7 @@ export async function buildSystemPrompt({
 }: BuildSystemPromptOptions): Promise<BuildSystemPromptResult> {
   const bookmarkCtx = cachedBookmarkCtx ?? await getBookmarkContextForAi();
   const [profileEntries, memoryEntries] = await Promise.all([getProfile(), getMemory()]);
+  const aiConfig = getActiveAiConfig(settings);
 
   // 按顺序拼装：角色定义 → 用户画像/记忆 → 扩展能力 → 书签快照（放最后，体积最大）
   let systemContent = SYSTEM_PROMPT;
@@ -70,10 +72,10 @@ export async function buildSystemPrompt({
 
   // 扩展能力
   const mcpCapabilities: string[] = [];
-  if (settings.mcpWebReader) {
+  if (aiConfig.mcpWebReader) {
     mcpCapabilities.push("- web_reader：抓取指定 URL 的网页内容，可用来阅读文章、获取页面信息");
   }
-  if (settings.mcpWebSearch) {
+  if (aiConfig.mcpWebSearch) {
     mcpCapabilities.push("- web_search：搜索网络信息，可用来查找最新资讯、验证信息，参数为 search_query");
   }
   if (mcpCapabilities.length > 0) {
