@@ -28,18 +28,29 @@ function generateFullSummary(): Promise<string> {
       .map((f) => `  - ${f.path}：${f.count} 条`)
       .join("\n");
 
-    const bookmarkLines = all
-      .map((b) => `  - ${b.title} | ${b.url} | ${b.path}`)
+    // 统计域名分布 Top 10
+    const domainCount = new Map<string, number>();
+    for (const b of all) {
+      if (!b.url) continue;
+      try {
+        const domain = new URL(b.url).hostname;
+        domainCount.set(domain, (domainCount.get(domain) ?? 0) + 1);
+      } catch {}
+    }
+    const topDomains = [...domainCount.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([d, c]) => `  - ${d}：${c} 条`)
       .join("\n");
 
     return [
-      `本机 Chrome 书签统计：共 ${all.length} 条书签。`,
+      `本机 Chrome 书签统计：共 ${all.length} 条书签，${folders.length} 个文件夹。`,
       folders.length
         ? `按文件夹条数：\n${folderLines}`
         : "无文件夹级统计。",
-      all.length
-        ? `全部书签名与 URL：\n${bookmarkLines}`
-        : "当前没有可列出的书签。",
-    ].join("\n");
+      topDomains
+        ? `域名分布 Top 10：\n${topDomains}`
+        : "",
+    ].filter(Boolean).join("\n");
   });
 }
