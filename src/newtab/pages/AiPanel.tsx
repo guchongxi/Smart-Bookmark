@@ -1267,7 +1267,7 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                             className="italic"
                             style={{ color: "hsl(var(--claude-ink-muted))" }}
                           >
-                            …
+                            {m.thinking ? "正在生成回复…" : "…"}
                           </span>
                         )
                         : ""}
