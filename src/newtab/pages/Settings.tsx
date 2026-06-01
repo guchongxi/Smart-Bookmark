@@ -55,7 +55,8 @@ export default function SettingsPage() {
   const onTestAi = async () => {
     setTesting(true);
     setTestResult(null);
-    const r = await testAi(s);
+    // 如果正在编辑预设，使用预设配置测试；否则使用 Settings 默认配置
+    const r = await testAi(editingPreset ?? s);
     setTestResult(r);
     setTesting(false);
   };

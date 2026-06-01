@@ -1,4 +1,4 @@
-import type { AiMessage, Settings } from "@/types";
+import type { AiMessage, AiPreset, Settings } from "@/types";
 import { sanitizeToolMessageHistory } from "@/lib/aiMessageHistory";
 import { getActiveAiConfig } from "@/lib/aiConfig";
 
@@ -269,13 +269,16 @@ async function chatAnthropic({ settings, messages, signal, onDelta, onToolCall, 
   return text;
 }
 
-export async function testAi(settings: Settings): Promise<{
+export async function testAi(settingsOrPreset: Settings | AiPreset): Promise<{
   ok: boolean;
   latencyMs: number;
   message: string;
 }> {
   const start = performance.now();
-  const aiConfig = getActiveAiConfig(settings);
+  // 支持直接传入 AiPreset 或 Settings
+  const aiConfig = 'provider' in settingsOrPreset && 'apiKey' in settingsOrPreset && !('aiProvider' in settingsOrPreset)
+    ? settingsOrPreset as AiPreset
+    : getActiveAiConfig(settingsOrPreset as Settings);
   try {
     if (aiConfig.provider === "openai") {
       if (!aiConfig.apiKey) throw new Error("缺少 API Key");
