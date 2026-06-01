@@ -21,6 +21,7 @@ import {
 import type { AiMessage, AiSession, Settings } from "@/types";
 import { cn } from "@/lib/utils";
 import { getActiveAiConfig } from "@/lib/aiConfig";
+import { setSettings } from "@/lib/storage";
 import {
   Send,
   Sparkles,
@@ -35,6 +36,7 @@ import {
   Brain,
   Terminal,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { useT } from "@/lib/i18n";
 import { fetchTrending, trendingToMarkdown } from "@/lib/github";
@@ -135,6 +137,11 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const [memoryInput, setMemoryInput] = useState("");
   const [sysPromptText, setSysPromptText] = useState("");
 
+  /* ── AI 配置切换 ── */
+  const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
+  const presets = settings.aiPresets ?? [];
+  const activePresetId = settings.activeAiPresetId;
+
   /** 是否自动滚动到底部（用户上翻时暂停，发新消息时恢复） */
   const autoScrollRef = useRef(true);
   /** 流式输出中标志，跳过 onScroll 干扰 */
@@ -162,6 +169,15 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     setSessions(list);
     return list;
   }, []);
+
+  /* ── 切换 AI 配置 ── */
+  const switchPreset = async (presetId: string) => {
+    await setSettings({ activeAiPresetId: presetId });
+    setPresetDropdownOpen(false);
+    // 清空系统提示词缓存，下次发消息时重新构建
+    systemPromptRef.current = "";
+    toast("已切换 AI 配置", "success");
+  };
 
   useEffect(() => {
     loadSessions().then((list) => {
@@ -992,31 +1008,85 @@ export default function AiPanel({ settings }: { settings: Settings }) {
               )}
               {t("discover.injectAi")}
             </Button>
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-mono text-[10.5px]",
-                isAiLive
-                  ? "bg-background/60"
-                  : "bg-muted/60 text-muted-foreground",
-              )}
-              style={
-                isAiLive
-                  ? { color: "hsl(var(--claude-ink-muted))" }
-                  : undefined
-              }
-              title={isAiLive ? modelLine : t("ai.disabled")}
-            >
-              <span
+            {/* AI 配置切换下拉 */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setPresetDropdownOpen(!presetDropdownOpen)}
                 className={cn(
-                  "h-1.5 w-1.5 rounded-full",
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 font-mono text-[10.5px] transition hover:opacity-80",
                   isAiLive
-                    ? "bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.15)]"
-                    : "bg-muted-foreground/40",
+                    ? "bg-background/60"
+                    : "bg-muted/60 text-muted-foreground",
                 )}
-                aria-hidden
-              />
-              {modelLine}
-            </span>
+                style={
+                  isAiLive
+                    ? { color: "hsl(var(--claude-ink-muted))" }
+                    : undefined
+                }
+                title="点击切换 AI 配置"
+              >
+                <span
+                  className={cn(
+                    "h-1.5 w-1.5 rounded-full",
+                    isAiLive
+                      ? "bg-emerald-500 shadow-[0_0_0_2px_rgba(16,185,129,0.15)]"
+                      : "bg-muted-foreground/40",
+                  )}
+                  aria-hidden
+                />
+                {modelLine}
+                {presets.length > 1 && (
+                  <ChevronDown className="h-3 w-3 opacity-50" />
+                )}
+              </button>
+              {/* 下拉菜单 */}
+              {presetDropdownOpen && presets.length > 1 && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setPresetDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 top-full z-50 mt-1 min-w-[200px] overflow-hidden rounded-lg border bg-background shadow-lg" style={{ borderColor: "hsl(var(--claude-rule))" }}>
+                    <div className="px-3 py-2 text-[11px] font-medium text-muted-foreground">
+                      切换 AI 配置
+                    </div>
+                    {presets.map((preset) => {
+                      const isActive = preset.id === activePresetId;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => switchPreset(preset.id)}
+                          className={cn(
+                            "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition hover:bg-muted/50",
+                            isActive && "bg-muted",
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              "h-1.5 w-1.5 rounded-full",
+                              isActive
+                                ? "bg-emerald-500"
+                                : "bg-muted-foreground/30",
+                            )}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate font-medium">{preset.name}</div>
+                            <div className="truncate text-[11px] text-muted-foreground">
+                              {preset.provider} · {preset.model || "未设置"}
+                            </div>
+                          </div>
+                          {isActive && (
+                            <span className="text-[10px] text-primary">当前</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => togglePanel("profile")}
