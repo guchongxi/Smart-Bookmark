@@ -28,6 +28,11 @@ export async function moveBookmark(id: string, parentId: string, index?: number)
   await chrome.bookmarks.move(id, { parentId, index });
 }
 
+export async function updateBookmark(id: string, changes: { title?: string; url?: string }) {
+  if (!hasChromeBookmarks) return;
+  await chrome.bookmarks.update(id, changes);
+}
+
 export function flatten(nodes: BookmarkNode[], pathPrefix = ""): FlatBookmark[] {
   const out: FlatBookmark[] = [];
   const walk = (node: BookmarkNode, path: string) => {

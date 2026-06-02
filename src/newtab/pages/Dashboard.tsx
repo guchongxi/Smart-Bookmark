@@ -12,6 +12,7 @@ import {
   findFolder,
   moveBookmark,
   removeBookmark,
+  updateBookmark,
 } from "@/lib/bookmarks";
 import type { BookmarkNode, FlatBookmark, Settings, TrendingMode, TrendingRange } from "@/types";
 import { Card } from "@/components/ui/card";
@@ -103,6 +104,11 @@ export default function Dashboard({
     | null
   >(null);
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  // 编辑对话框状态
+  const [editDialog, setEditDialog] = useState<
+    | { id: string; title: string; url: string }
+    | null
+  >(null);
   // favicon 刷新 key，key 变化时触发重新获取
   const [faviconKeys, setFaviconKeys] = useState<Record<string, number>>({});
   const [viewMode, setViewMode] = useState<"flat" | "grouped">("flat");
@@ -506,33 +512,83 @@ export default function Dashboard({
       setOverId(null);
       return;
     }
-    const src = items.find((i) => i.id === dragId);
-    const tgt = items.find((i) => i.id === targetId);
-    if (!src || !tgt || src.parentId !== tgt.parentId) {
+
+    // 分组视图下使用 groupedData.directItems
+    const currentItems = viewMode === "grouped" ? groupedData.directItems : items;
+    const src = currentItems.find((i) => i.id === dragId);
+    const tgt = currentItems.find((i) => i.id === targetId);
+
+    if (!src || !tgt) {
       setDragId(null);
       setOverId(null);
       return;
     }
-    const siblingIds = items
-      .filter((x) => x.parentId === tgt.parentId)
-      .map((x) => x.id);
-    const srcIdx = siblingIds.indexOf(dragId);
-    const dstIdx = siblingIds.indexOf(targetId);
-    const nextAll = [...items];
-    const srcInAll = nextAll.findIndex((x) => x.id === dragId);
-    const [moved] = nextAll.splice(srcInAll, 1);
-    const dstInAll = nextAll.findIndex((x) => x.id === targetId);
-    nextAll.splice(dstInAll, 0, moved);
-    setItems(nextAll.map((x, i) => ({ ...x, index: i })));
-    try {
-      if (src.parentId) {
-        await moveBookmark(dragId, src.parentId, dstIdx);
+
+    // 同目录排序
+    if (src.parentId === tgt.parentId) {
+      const siblingIds = currentItems
+        .filter((x) => x.parentId === tgt.parentId)
+        .map((x) => x.id);
+      const dstIdx = siblingIds.indexOf(targetId);
+
+      // 乐观更新 UI
+      if (viewMode === "grouped") {
+        const nextDirect = [...groupedData.directItems];
+        const srcIdx = nextDirect.findIndex((x) => x.id === dragId);
+        const [moved] = nextDirect.splice(srcIdx, 1);
+        const dstIdxInArr = nextDirect.findIndex((x) => x.id === targetId);
+        nextDirect.splice(dstIdxInArr, 0, moved);
+        // groupedData 是 useMemo，不能直接 set，需要 reload
+      } else {
+        const nextAll = [...items];
+        const srcInAll = nextAll.findIndex((x) => x.id === dragId);
+        const [moved] = nextAll.splice(srcInAll, 1);
+        const dstInAll = nextAll.findIndex((x) => x.id === targetId);
+        nextAll.splice(dstInAll, 0, moved);
+        setItems(nextAll.map((x, i) => ({ ...x, index: i })));
       }
+
+      try {
+        if (src.parentId) {
+          await moveBookmark(dragId, src.parentId, dstIdx);
+        }
+      } catch (err) {
+        console.warn("reorder failed", err);
+        toast("排序失败", "error");
+      } finally {
+        reload();
+        setDragId(null);
+        setOverId(null);
+      }
+    } else {
+      // 跨目录移动
+      setDragId(null);
+      setOverId(null);
+    }
+  };
+
+  // 拖拽到子文件夹区块
+  const onDropToFolder = async (e: React.DragEvent, folderId: string) => {
+    e.preventDefault();
+    if (!dragId) {
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+    const src = items.find((i) => i.id === dragId) ?? groupedData.directItems.find((i) => i.id === dragId);
+    if (!src || src.parentId === folderId) {
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+    try {
+      await moveBookmark(dragId, folderId);
+      toast("已移动到文件夹", "success");
     } catch (err) {
-      console.warn("reorder failed", err, srcIdx, dstIdx);
-      toast("排序失败", "error");
-      reload();
+      console.warn("move failed", err);
+      toast("移动失败", "error");
     } finally {
+      reload();
       setDragId(null);
       setOverId(null);
     }
@@ -1301,8 +1357,22 @@ export default function Dashboard({
             {/* 子文件夹区块 */}
             {groupedData.sections.map((section) => {
               const isCollapsed = collapsedSections.has(section.id);
+              const isOverFolder = overId === `folder:${section.id}`;
               return (
-                <div key={section.id} className="rounded-xl border border-border/40 bg-muted/20">
+                <div
+                  key={section.id}
+                  className={cn(
+                    "rounded-xl border border-border/40 bg-muted/20 transition-all",
+                    isOverFolder && dragId && "ring-2 ring-primary/60 border-primary/40",
+                  )}
+                  onDragOver={(e) => {
+                    if (!dragId) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setOverId(`folder:${section.id}`);
+                  }}
+                  onDrop={(e) => onDropToFolder(e, section.id)}
+                >
                   <button
                     onClick={() => {
                       setCollapsedSections((prev) => {
@@ -1330,6 +1400,9 @@ export default function Dashboard({
                         ? `${section.items.length} 项`
                         : `${section.count} 项`}
                     </span>
+                    {isOverFolder && dragId && (
+                      <span className="ml-auto text-[11px] text-primary">释放以移动</span>
+                    )}
                   </button>
                   {!isCollapsed && (
                     <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5">
@@ -1403,6 +1476,10 @@ export default function Dashboard({
               }));
               setCtxMenu(null);
             }}
+            onEdit={() => {
+              setEditDialog({ id: ctxMenu.id, title: ctxMenu.title, url: ctxMenu.url });
+              setCtxMenu(null);
+            }}
             onDelete={() => {
               if (!confirm(`确定删除书签「${ctxMenu.title}」？`)) return;
               removeBookmark(ctxMenu.id);
@@ -1413,6 +1490,26 @@ export default function Dashboard({
         )}
 
       {qrUrl && <QrDialog url={qrUrl} onClose={() => setQrUrl(null)} />}
+
+      {/* 编辑对话框 */}
+      {editDialog && (
+        <EditBookmarkDialog
+          initialTitle={editDialog.title}
+          initialUrl={editDialog.url}
+          onClose={() => setEditDialog(null)}
+          onSave={async (title, url) => {
+            try {
+              await updateBookmark(editDialog.id, { title, url });
+              toast("已保存", "success");
+              reload();
+            } catch (err) {
+              console.warn("update failed", err);
+              toast("保存失败", "error");
+            }
+            setEditDialog(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1763,6 +1860,7 @@ function BookmarkCtxMenu({
   onCopy,
   onQr,
   onRefreshIcon,
+  onEdit,
   onDelete,
 }: {
   id: string;
@@ -1773,6 +1871,7 @@ function BookmarkCtxMenu({
   onCopy: () => void;
   onQr: () => void;
   onRefreshIcon: () => void;
+  onEdit: () => void;
   onDelete: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -1811,6 +1910,12 @@ function BookmarkCtxMenu({
       >
         重新获取 icon
       </button>
+      <button
+        className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left hover:bg-accent"
+        onClick={onEdit}
+      >
+        编辑
+      </button>
       <div className="my-1 h-px bg-border" />
       <button
         className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-left text-destructive hover:bg-destructive/10"
@@ -1818,6 +1923,71 @@ function BookmarkCtxMenu({
       >
         删除书签
       </button>
+    </div>
+  );
+}
+
+// 编辑书签对话框
+function EditBookmarkDialog({
+  initialTitle,
+  initialUrl,
+  onClose,
+  onSave,
+}: {
+  initialTitle: string;
+  initialUrl: string;
+  onClose: () => void;
+  onSave: (title: string, url: string) => void;
+}) {
+  const [title, setTitle] = useState(initialTitle);
+  const [url, setUrl] = useState(initialUrl);
+  const titleRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!title.trim() || !url.trim()) return;
+    onSave(title.trim(), url.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div
+        className="w-full max-w-md rounded-xl border bg-background p-5 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="mb-4 text-base font-medium">编辑书签</h3>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <label className="mb-1 block text-sm text-muted-foreground">标题</label>
+            <Input
+              ref={titleRef}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="书签标题"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-muted-foreground">链接</label>
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://..."
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose}>
+              取消
+            </Button>
+            <Button type="submit" disabled={!title.trim() || !url.trim()}>
+              保存
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }
