@@ -99,8 +99,9 @@ export default function Dashboard({
   const [query, setQuery] = useState(initialQuery ?? "");
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
-  // 拖拽指示线位置
+  // 拖拽指示线位置（包含 gridId 用于区分不同容器）
   const [dropIndicator, setDropIndicator] = useState<{
+    gridId: string;
     left: number;
     top: number;
     height: number;
@@ -523,10 +524,11 @@ export default function Dashboard({
     const mouseX = e.clientX - rect.left;
     const isBefore = mouseX < rect.width / 2;
 
-    // 获取父容器的位置
+    // 获取父容器的位置和 gridId
     const gridEl = cardEl.parentElement;
     if (!gridEl) return;
     const gridRect = gridEl.getBoundingClientRect();
+    const gridId = gridEl.getAttribute('data-grid-id') || 'default';
 
     // 计算 gap
     const gap = parseInt(getComputedStyle(gridEl).gap) || 12;
@@ -537,6 +539,7 @@ export default function Dashboard({
       : rect.right - gridRect.left + gap / 2;
 
     setDropIndicator({
+      gridId,
       left,
       top: rect.top - gridRect.top - 4,
       height: rect.height + 8,
@@ -1385,7 +1388,7 @@ export default function Dashboard({
 
         {/* 平铺视图 */}
         {viewMode === "flat" && (
-          <div className={gridClassName} style={{ position: "relative" }}>
+          <div className={gridClassName} style={{ position: "relative" }} data-grid-id="flat">
             {pagedItems.map((b) => (
               <BookmarkCard
                 key={b.id}
@@ -1402,7 +1405,7 @@ export default function Dashboard({
               />
             ))}
             {/* 拖拽指示线 */}
-            {dropIndicator && (
+            {dropIndicator && dropIndicator.gridId === "flat" && (
               <div
                 className="pointer-events-none absolute z-50"
                 style={{
@@ -1460,7 +1463,7 @@ export default function Dashboard({
           <div className="space-y-5 pt-2">
             {/* 直接子项 */}
             {groupedData.directItems.length > 0 && (
-              <div className={gridClassName} style={{ position: "relative" }}>
+              <div className={gridClassName} style={{ position: "relative" }} data-grid-id="direct">
                   {groupedData.directItems.map((b) => (
                     <BookmarkCard
                       key={b.id}
@@ -1477,7 +1480,7 @@ export default function Dashboard({
                     />
                   ))}
                   {/* 拖拽指示线 */}
-                  {dropIndicator && (
+                  {dropIndicator && dropIndicator.gridId === "direct" && (
                     <div
                       className="pointer-events-none absolute z-50"
                       style={{
@@ -1567,7 +1570,7 @@ export default function Dashboard({
                     )}
                   </button>
                   {!isCollapsed && (
-                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5" style={{ position: "relative" }}>
+                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5" style={{ position: "relative" }} data-grid-id={section.id}>
                       {section.items.map((b) => (
                         <BookmarkCard
                           key={b.id}
@@ -1584,7 +1587,7 @@ export default function Dashboard({
                         />
                       ))}
                       {/* 拖拽指示线 */}
-                      {dropIndicator && (
+                      {dropIndicator && dropIndicator.gridId === section.id && (
                         <div
                           className="pointer-events-none absolute z-50"
                           style={{
