@@ -490,7 +490,9 @@ export default function Dashboard({
     }
   };
 
-  const canReorder = !!selected && !query.trim() && items.length > 0;
+  const canReorder = !!selected && !query.trim() && (
+    viewMode === "grouped" ? groupedData.directItems.length > 0 : items.length > 0
+  );
 
   const onDragStart = (e: React.DragEvent, id: string) => {
     if (!canReorder) return;
