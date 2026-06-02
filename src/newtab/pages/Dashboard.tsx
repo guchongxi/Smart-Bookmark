@@ -99,6 +99,12 @@ export default function Dashboard({
   const [query, setQuery] = useState(initialQuery ?? "");
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  // 拖拽指示线位置
+  const [dropIndicator, setDropIndicator] = useState<{
+    left: number;
+    top: number;
+    height: number;
+  } | null>(null);
   const [ctxMenu, setCtxMenu] = useState<
     | { id: string; url: string; x: number; y: number; title: string }
     | null
@@ -508,9 +514,37 @@ export default function Dashboard({
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setOverId(id);
+
+    // 计算指示线位置
+    const cardEl = (e.target as HTMLElement).closest('[data-bookmark-id]') as HTMLElement;
+    if (!cardEl) return;
+
+    const rect = cardEl.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const isBefore = mouseX < rect.width / 2;
+
+    // 获取父容器的位置
+    const gridEl = cardEl.parentElement;
+    if (!gridEl) return;
+    const gridRect = gridEl.getBoundingClientRect();
+
+    // 计算 gap
+    const gap = parseInt(getComputedStyle(gridEl).gap) || 12;
+
+    // 指示线位置（相对于父容器）
+    const left = isBefore
+      ? rect.left - gridRect.left - gap / 2
+      : rect.right - gridRect.left + gap / 2;
+
+    setDropIndicator({
+      left,
+      top: rect.top - gridRect.top - 4,
+      height: rect.height + 8,
+    });
   };
   const onDrop = async (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
+    setDropIndicator(null);
     if (!canReorder || !dragId || dragId === targetId) {
       setDragId(null);
       setOverId(null);
@@ -574,6 +608,7 @@ export default function Dashboard({
   // 拖拽到子文件夹区块
   const onDropToFolder = async (e: React.DragEvent, folderId: string) => {
     e.preventDefault();
+    setDropIndicator(null);
     if (!dragId) {
       setDragId(null);
       setOverId(null);
@@ -601,6 +636,7 @@ export default function Dashboard({
   // 子文件夹区块内的拖拽排序
   const onDropInSection = async (e: React.DragEvent, targetId: string, sectionItems: typeof groupedData.sections[0]["items"]) => {
     e.preventDefault();
+    setDropIndicator(null);
     if (!dragId || dragId === targetId) {
       setDragId(null);
       setOverId(null);
@@ -656,6 +692,7 @@ export default function Dashboard({
     document.body.style.cursor = "";
     setDragId(null);
     setOverId(null);
+    setDropIndicator(null);
   }, []);
 
   const handleBookmarkContextMenu = useCallback((e: React.MouseEvent, url: string, title: string, id: string) => {
@@ -1348,7 +1385,7 @@ export default function Dashboard({
 
         {/* 平铺视图 */}
         {viewMode === "flat" && (
-          <div className={gridClassName}>
+          <div className={gridClassName} style={{ position: "relative" }}>
             {pagedItems.map((b) => (
               <BookmarkCard
                 key={b.id}
@@ -1364,6 +1401,43 @@ export default function Dashboard({
                 onContextMenu={handleBookmarkContextMenu}
               />
             ))}
+            {/* 拖拽指示线 */}
+            {dropIndicator && (
+              <div
+                className="pointer-events-none absolute z-50"
+                style={{
+                  left: dropIndicator.left,
+                  top: dropIndicator.top,
+                  height: dropIndicator.height,
+                  width: 3,
+                  background: "hsl(var(--primary))",
+                  borderRadius: 2,
+                }}
+              >
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                  style={{
+                    top: -4,
+                    width: 9,
+                    height: 9,
+                    background: "hsl(var(--primary))",
+                    border: "2px solid hsl(var(--background))",
+                    boxShadow: "0 0 0 1px hsl(var(--primary))",
+                  }}
+                />
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                  style={{
+                    bottom: -4,
+                    width: 9,
+                    height: 9,
+                    background: "hsl(var(--primary))",
+                    border: "2px solid hsl(var(--background))",
+                    boxShadow: "0 0 0 1px hsl(var(--primary))",
+                  }}
+                />
+              </div>
+            )}
             {!filtered.length && !subFolders.length && (
               <div className="col-span-full rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
                 {t("dash.empty")}
@@ -1386,7 +1460,7 @@ export default function Dashboard({
           <div className="space-y-5 pt-2">
             {/* 直接子项 */}
             {groupedData.directItems.length > 0 && (
-              <div className={gridClassName}>
+              <div className={gridClassName} style={{ position: "relative" }}>
                   {groupedData.directItems.map((b) => (
                     <BookmarkCard
                       key={b.id}
@@ -1402,6 +1476,43 @@ export default function Dashboard({
                       onContextMenu={handleBookmarkContextMenu}
                     />
                   ))}
+                  {/* 拖拽指示线 */}
+                  {dropIndicator && (
+                    <div
+                      className="pointer-events-none absolute z-50"
+                      style={{
+                        left: dropIndicator.left,
+                        top: dropIndicator.top,
+                        height: dropIndicator.height,
+                        width: 3,
+                        background: "hsl(var(--primary))",
+                        borderRadius: 2,
+                      }}
+                    >
+                      <div
+                        className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                        style={{
+                          top: -4,
+                          width: 9,
+                          height: 9,
+                          background: "hsl(var(--primary))",
+                          border: "2px solid hsl(var(--background))",
+                          boxShadow: "0 0 0 1px hsl(var(--primary))",
+                        }}
+                      />
+                      <div
+                        className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                        style={{
+                          bottom: -4,
+                          width: 9,
+                          height: 9,
+                          background: "hsl(var(--primary))",
+                          border: "2px solid hsl(var(--background))",
+                          boxShadow: "0 0 0 1px hsl(var(--primary))",
+                        }}
+                      />
+                    </div>
+                  )}
               </div>
             )}
 
@@ -1456,7 +1567,7 @@ export default function Dashboard({
                     )}
                   </button>
                   {!isCollapsed && (
-                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5">
+                    <div className="grid grid-cols-2 gap-3 px-4 pb-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 2xl:grid-cols-5" style={{ position: "relative" }}>
                       {section.items.map((b) => (
                         <BookmarkCard
                           key={b.id}
@@ -1472,6 +1583,43 @@ export default function Dashboard({
                           onContextMenu={handleBookmarkContextMenu}
                         />
                       ))}
+                      {/* 拖拽指示线 */}
+                      {dropIndicator && (
+                        <div
+                          className="pointer-events-none absolute z-50"
+                          style={{
+                            left: dropIndicator.left,
+                            top: dropIndicator.top,
+                            height: dropIndicator.height,
+                            width: 3,
+                            background: "hsl(var(--primary))",
+                            borderRadius: 2,
+                          }}
+                        >
+                          <div
+                            className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                            style={{
+                              top: -4,
+                              width: 9,
+                              height: 9,
+                              background: "hsl(var(--primary))",
+                              border: "2px solid hsl(var(--background))",
+                              boxShadow: "0 0 0 1px hsl(var(--primary))",
+                            }}
+                          />
+                          <div
+                            className="absolute left-1/2 -translate-x-1/2 rounded-full"
+                            style={{
+                              bottom: -4,
+                              width: 9,
+                              height: 9,
+                              background: "hsl(var(--primary))",
+                              border: "2px solid hsl(var(--background))",
+                              boxShadow: "0 0 0 1px hsl(var(--primary))",
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1718,6 +1866,7 @@ function BookmarkCard({
   return (
     <div
       draggable={canReorder}
+      data-bookmark-id={b.id}
       onDragStart={(e) => onDragStart(e, b.id)}
       onDragEnd={onDragEnd}
       onDragOver={(e) => onDragOver(e, b.id)}
