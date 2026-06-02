@@ -285,7 +285,7 @@ export default function Dashboard({
     }));
 
     // 4. 常去站点
-    const topSiteItems = topSites.slice(0, 4).map((s) => ({
+    const topSiteItems = topSites.slice(0, 10).map((s) => ({
       type: "topsite" as const,
       id: s.url,
       title: s.title,
@@ -1642,7 +1642,7 @@ export default function Dashboard({
       {(showGithubTrendingWidget || showTopSites) && (
         <aside className="hidden 2xl:block 2xl:sticky 2xl:top-20 2xl:self-start space-y-4">
           {showTopSites && topSites.length > 0 && (
-            <TopSitesSidebar sites={topSites} limit={3} />
+            <TopSitesSidebar sites={topSites} limit={10} />
           )}
           {showGithubTrendingWidget && (
             <TrendingSidebar
