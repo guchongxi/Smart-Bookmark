@@ -308,10 +308,13 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   );
   // 每次渲染同步 messages 到 ref，确保异步回调中能读到最新值
   messagesRef.current = messages;
+  const activePreset = presets.find(p => p.id === activePresetId);
   const modelLine =
     aiConfig.provider === "none"
       ? t("ai.disabled")
-      : `${aiConfig.provider} · ${aiConfig.model}`;
+      : activePreset
+        ? `${activePreset.name} · ${aiConfig.model}`
+        : aiConfig.model;
 
   /** 构造 onToolCall 回调，累积流式 tool call 参数 */
   const makeOnToolCall = () => (call: import("@/lib/ai").ToolCallDelta) => {
