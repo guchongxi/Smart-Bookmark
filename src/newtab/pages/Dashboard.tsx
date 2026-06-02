@@ -491,7 +491,9 @@ export default function Dashboard({
   };
 
   const canReorder = !!selected && !query.trim() && (
-    viewMode === "grouped" ? groupedData.directItems.length > 0 : items.length > 0
+    viewMode === "grouped"
+      ? groupedData.directItems.length > 0 || groupedData.sections.some(s => s.items.length > 0)
+      : items.length > 0
   );
 
   const onDragStart = (e: React.DragEvent, id: string) => {
@@ -589,6 +591,53 @@ export default function Dashboard({
     } catch (err) {
       console.warn("move failed", err);
       toast("移动失败", "error");
+    } finally {
+      reload();
+      setDragId(null);
+      setOverId(null);
+    }
+  };
+
+  // 子文件夹区块内的拖拽排序
+  const onDropInSection = async (e: React.DragEvent, targetId: string, sectionItems: typeof groupedData.sections[0]["items"]) => {
+    e.preventDefault();
+    if (!dragId || dragId === targetId) {
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+
+    const src = sectionItems.find((i) => i.id === dragId);
+    const tgt = sectionItems.find((i) => i.id === targetId);
+    if (!src || !tgt || src.parentId !== tgt.parentId) {
+      // 如果跨区块，尝试移动到目标文件夹
+      if (src && tgt && src.parentId !== tgt.parentId) {
+        try {
+          await moveBookmark(dragId, tgt.parentId!);
+          toast("已移动到文件夹", "success");
+        } catch (err) {
+          console.warn("move failed", err);
+          toast("移动失败", "error");
+        }
+      }
+      setDragId(null);
+      setOverId(null);
+      return;
+    }
+
+    // 同区块内排序
+    const siblingIds = sectionItems
+      .filter((x) => x.parentId === tgt.parentId)
+      .map((x) => x.id);
+    const dstIdx = siblingIds.indexOf(targetId);
+
+    try {
+      if (src.parentId) {
+        await moveBookmark(dragId, src.parentId, dstIdx);
+      }
+    } catch (err) {
+      console.warn("reorder failed", err);
+      toast("排序失败", "error");
     } finally {
       reload();
       setDragId(null);
@@ -1412,14 +1461,14 @@ export default function Dashboard({
                         <BookmarkCard
                           key={b.id}
                           b={b}
-                          canReorder={false}
-                          dragId={null}
-                          overId={null}
+                          canReorder={canReorder}
+                          dragId={dragId}
+                          overId={overId}
                           faviconKeys={faviconKeys}
-                          onDragStart={() => {}}
-                          onDragEnd={() => {}}
-                          onDragOver={() => {}}
-                          onDrop={() => {}}
+                          onDragStart={onDragStart}
+                          onDragEnd={handleDragEnd}
+                          onDragOver={onDragOver}
+                          onDrop={(e, id) => onDropInSection(e, id, section.items)}
                           onContextMenu={handleBookmarkContextMenu}
                         />
                       ))}
