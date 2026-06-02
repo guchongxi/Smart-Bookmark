@@ -1685,6 +1685,7 @@ function BookmarkCard({
     >
       <a
         href={b.url}
+        draggable={false}
         className={cn(
           "flex w-full items-center gap-3",
           canReorder && "cursor-inherit",
