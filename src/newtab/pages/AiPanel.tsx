@@ -1251,9 +1251,6 @@ export default function AiPanel({ settings }: { settings: Settings }) {
             {visible.map((m, i) => {
               const isUser = m.role === "user";
               const isToolConfirm = m.role === "tool-confirm";
-              const rail = isUser
-                ? "hsl(var(--primary))"
-                : "hsl(var(--claude-accent))";
               if (isToolConfirm) {
                 return (
                   <article
@@ -1287,61 +1284,73 @@ export default function AiPanel({ settings }: { settings: Settings }) {
               return (
                 <article
                   key={m.at != null ? `${m.at}-${m.role}-${i}` : i}
-                  className="pl-4"
-                  style={{
-                    borderLeft: `2px solid ${rail}`,
-                  }}
+                  className={cn(
+                    "flex gap-3",
+                    isUser && "flex-row-reverse",
+                  )}
                 >
-                  <header
-                    className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]"
-                    style={{ color: "hsl(var(--claude-ink-muted))" }}
-                  >
-                    <span
-                      className="font-serif text-[13px] font-semibold tracking-tight text-foreground"
-                      style={isUser ? undefined : { color: rail }}
-                    >
-                      {isUser ? t("ai.userLabel") : t("ai.assistantLabel")}
-                    </span>
-                    {m.at != null && (
-                      <time dateTime={new Date(m.at).toISOString()}>
-                        {formatMsgTime(m.at, settings.language)}
-                      </time>
-                    )}
-                    {!isUser && aiConfig.provider !== "none" && (
-                      <span className="rounded-md bg-background/60 px-1.5 py-0 font-mono text-[10px]">
-                        {modelLine}
-                      </span>
-                    )}
-                  </header>
+                  {/* 头像 */}
                   <div
                     className={cn(
-                      "text-[14px] leading-[1.7] text-foreground/90",
-                      !isUser && "space-y-1",
-                      isUser && "whitespace-pre-wrap",
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white",
+                      isUser
+                        ? "bg-gradient-to-br from-[hsl(var(--primary))] to-[hsl(var(--primary))]"
+                        : "bg-gradient-to-br from-emerald-500 to-emerald-600",
                     )}
                   >
-                    {/* 自动学习结果 */}
-                    {m.learnDetail && (
-                      <LearnResultBlock detail={m.learnDetail} />
-                    )}
-                    {/* 思考过程折叠块：有 thinking 无 content 时展开（思考中），有 content 后折叠 */}
-                    {!isUser && aiConfig.showThinking && m.thinking && (
-                      <ThinkingBlock content={m.thinking} expanded={!m.content} />
-                    )}
-                    {m.content
-                      ? isUser
-                        ? m.content
-                        : renderMarkdown(m.content)
-                      : loading && i === visible.length - 1
-                        ? (
-                          <span
-                            className="italic"
-                            style={{ color: "hsl(var(--claude-ink-muted))" }}
-                          >
-                            {m.thinking ? "正在生成回复…" : "…"}
-                          </span>
-                        )
-                        : ""}
+                    {isUser ? "U" : "AI"}
+                  </div>
+
+                  {/* 消息内容 */}
+                  <div className={cn("max-w-[80%]", isUser && "items-end")}>
+                    {/* 气泡 */}
+                    <div
+                      className={cn(
+                        "rounded-2xl px-4 py-2.5 text-[14px] leading-[1.7]",
+                        isUser
+                          ? "bg-[hsl(var(--primary))] text-primary-foreground rounded-br-md"
+                          : "bg-muted text-foreground rounded-bl-md",
+                      )}
+                    >
+                      {/* 自动学习结果 */}
+                      {m.learnDetail && (
+                        <LearnResultBlock detail={m.learnDetail} />
+                      )}
+                      {/* 思考过程折叠块 */}
+                      {!isUser && aiConfig.showThinking && m.thinking && (
+                        <ThinkingBlock content={m.thinking} expanded={!m.content} />
+                      )}
+                      {m.content
+                        ? isUser
+                          ? <span className="whitespace-pre-wrap">{m.content}</span>
+                          : <div className="space-y-1">{renderMarkdown(m.content)}</div>
+                        : loading && i === visible.length - 1
+                          ? (
+                            <span className="italic opacity-70">
+                              {m.thinking ? "正在生成回复…" : "…"}
+                            </span>
+                          )
+                          : ""}
+                    </div>
+
+                    {/* 时间和模型信息 */}
+                    <div
+                      className={cn(
+                        "mt-1 flex items-center gap-2 text-[11px] text-muted-foreground",
+                        isUser && "justify-end",
+                      )}
+                    >
+                      {m.at != null && (
+                        <time dateTime={new Date(m.at).toISOString()}>
+                          {formatMsgTime(m.at, settings.language)}
+                        </time>
+                      )}
+                      {!isUser && aiConfig.provider !== "none" && (
+                        <span className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">
+                          {modelLine}
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </article>
               );
