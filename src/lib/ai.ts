@@ -48,7 +48,7 @@ function toApiMessages(
         if (m.thinking) assistantMessage.reasoning_content = m.thinking;
         result.push(assistantMessage);
       }
-    } else if (m.role !== "system" && m.role !== "tool-confirm") {
+    } else if (m.role !== "tool-confirm") {
       if (options.stripAssistantWithoutThinking && m.role === "assistant" && !m.thinking) {
         continue;
       }
