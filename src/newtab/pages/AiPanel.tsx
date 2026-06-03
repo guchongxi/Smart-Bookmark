@@ -141,6 +141,8 @@ export default function AiPanel({ settings }: { settings: Settings }) {
   const [presetDropdownOpen, setPresetDropdownOpen] = useState(false);
   const presets = settings.aiPresets ?? [];
   const activePresetId = settings.activeAiPresetId;
+  // 工具调用详情展开状态（key 为消息索引）
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<number>>(new Set());
 
   /** 是否自动滚动到底部（用户上翻时暂停，发新消息时恢复） */
   const autoScrollRef = useRef(true);
@@ -1351,6 +1353,68 @@ export default function AiPanel({ settings }: { settings: Settings }) {
                         </span>
                       )}
                     </div>
+
+                    {/* 工具调用标签（仅 AI 消息） */}
+                    {!isUser && m.toolCalls && m.toolCalls.length > 0 && (() => {
+                      const isExpanded = expandedToolCalls.has(i);
+                      return (
+                        <div className="mt-2">
+                          {/* 收起状态：显示前 3 个工具名 */}
+                          {!isExpanded && (
+                            <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                              <span className="text-xs">🔧</span>
+                              {m.toolCalls.slice(0, 3).map((tc) => (
+                                <span key={tc.id} className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                                  {tc.name}
+                                </span>
+                              ))}
+                              {m.toolCalls.length > 3 && (
+                                <span className="text-[10px]">...</span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setExpandedToolCalls(prev => new Set(prev).add(i))}
+                                className="ml-1 text-[hsl(var(--primary))] hover:underline"
+                              >
+                                展开
+                              </button>
+                            </div>
+                          )}
+
+                          {/* 展开状态：显示完整列表 */}
+                          {isExpanded && (
+                            <div className="rounded-lg border border-border/40 bg-muted/30 p-2.5 text-[11px]">
+                              {m.toolCalls.map((tc) => {
+                                const hasTcArgs = tc.args && Object.keys(tc.args).length > 0;
+                                return (
+                                  <div key={tc.id} className="border-b border-border/20 py-1.5 last:border-0">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-mono font-semibold text-[hsl(var(--primary))]">{tc.name}</span>
+                                    </div>
+                                    {hasTcArgs && (
+                                      <pre className="mt-1 overflow-x-auto rounded bg-background/60 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                                        {JSON.stringify(tc.args, null, 2)}
+                                      </pre>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              <button
+                                type="button"
+                                onClick={() => setExpandedToolCalls(prev => {
+                                  const next = new Set(prev);
+                                  next.delete(i);
+                                  return next;
+                                })}
+                                className="mt-1 text-[10px] text-[hsl(var(--primary))] hover:underline"
+                              >
+                                收起
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 </article>
               );

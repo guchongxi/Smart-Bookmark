@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI 工具调用显示原型</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f5f5f5;
+      padding: 40px;
+      color: #333;
+    }
+    h1 { margin-bottom: 8px; font-size: 20px; }
+    p.subtitle { color: #666; margin-bottom: 32px; font-size: 14px; }
+
+    .demo-section {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 32px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+    .demo-section h2 {
+      font-size: 16px;
+      margin-bottom: 16px;
+      color: #555;
+    }
+
+    .chat-container {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+
+    /* 消息样式 */
+    .msg {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .msg.user {
+      flex-direction: row-reverse;
+    }
+    .msg .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      font-weight: 600;
+      flex-shrink: 0;
+      color: white;
+    }
+    .msg.user .avatar {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+    }
+    .msg.assistant .avatar {
+      background: linear-gradient(135deg, #10b981, #059669);
+    }
+    .msg .bubble {
+      max-width: 80%;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .msg.user .bubble {
+      background: #667eea;
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .msg.assistant .bubble {
+      background: #f3f4f6;
+      color: #333;
+      border-bottom-left-radius: 4px;
+    }
+    .msg .time {
+      font-size: 10px;
+      color: #999;
+      margin-top: 4px;
+    }
+    .msg.user .time { text-align: right; }
+
+    /* 工具调用标签 - 方案 A：紧凑行 */
+    .tool-calls-inline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-top: 6px;
+      font-size: 11px;
+      color: #888;
+    }
+    .tool-calls-inline .tool-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 6px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 10px;
+      color: #555;
+    }
+    .tool-calls-inline .tool-tag.failed {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .tool-calls-inline .expand-btn {
+      color: #667eea;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    .tool-calls-inline .expand-btn:hover {
+      text-decoration: underline;
+    }
+
+    /* 工具调用详情 - 展开后 */
+    .tool-calls-detail {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: #f8f9fa;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+    .tool-calls-detail .tool-item {
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .tool-calls-detail .tool-item:last-child {
+      border-bottom: none;
+    }
+    .tool-calls-detail .tool-name {
+      font-family: monospace;
+      font-weight: 600;
+      color: #667eea;
+    }
+    .tool-calls-detail .tool-name.failed {
+      color: #dc2626;
+    }
+    .tool-calls-detail .tool-args {
+      margin-top: 4px;
+      padding: 6px 8px;
+      background: white;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 11px;
+      color: #666;
+      overflow-x: auto;
+    }
+    .tool-calls-detail .tool-result {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #888;
+    }
+    .tool-calls-detail .tool-result.success {
+      color: #10b981;
+    }
+    .tool-calls-detail .tool-result.error {
+      color: #dc2626;
+    }
+
+    /* 方案 B：卡片式 */
+    .tool-calls-card {
+      margin-top: 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .tool-calls-card .header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      background: #f8f9fa;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 11px;
+      color: #666;
+      cursor: pointer;
+    }
+    .tool-calls-card .header:hover {
+      background: #f0f1f3;
+    }
+    .tool-calls-card .header .icon {
+      font-size: 12px;
+    }
+    .tool-calls-card .header .count {
+      margin-left: auto;
+      font-size: 10px;
+      color: #999;
+    }
+    .tool-calls-card .content {
+      padding: 10px 12px;
+      display: none;
+    }
+    .tool-calls-card.expanded .content {
+      display: block;
+    }
+    .tool-calls-card .tool-item {
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .tool-calls-card .tool-item:last-child {
+      border-bottom: none;
+    }
+
+    /* 对比 */
+    .comparison {
+      margin-top: 24px;
+      font-size: 13px;
+    }
+    .comparison table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .comparison th, .comparison td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid #eee;
+    }
+    .comparison th {
+      background: #f8f9fa;
+      font-weight: 600;
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+    .tag.recommend { background: #d1fae5; color: #065f46; }
+
+    .note {
+      margin-top: 16px;
+      padding: 12px 16px;
+      background: #f0f4ff;
+      border: 1px solid #d0d8ff;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #445;
+    }
+  </style>
+</head>
+<body>
+
+<h1>AI 工具调用显示方案</h1>
+<p class="subtitle">在 AI 回复下方显示本次使用的工具</p>
+
+<!-- 方案 A：紧凑行 -->
+<div class="demo-section">
+  <h2>方案 A：紧凑行 <span class="tag recommend">推荐</span></h2>
+  <p style="font-size: 13px; color: #666; margin-bottom: 16px;">
+    在气泡下方用小标签显示工具名，点击展开详情。
+  </p>
+
+  <div class="chat-container">
+    <div class="msg user">
+      <div class="avatar">U</div>
+      <div>
+        <div class="bubble">帮我找一下重复的书签</div>
+        <div class="time">14:30</div>
+      </div>
+    </div>
+
+    <div class="msg assistant">
+      <div class="avatar">AI</div>
+      <div>
+        <div class="bubble">好的，我来帮你查找重复书签。找到了 5 组重复书签，主要是 GitHub 和 Stack Overflow 的链接...</div>
+        <div class="time">14:30 · claude-3-5-sonnet</div>
+        <!-- 工具调用 - 收起状态 -->
+        <div class="tool-calls-inline">
+          <span>🔧</span>
+          <span class="tool-tag">search_bookmarks</span>
+          <span class="tool-tag">list_folders</span>
+          <span class="tool-tag">list_memory</span>
+          <span class="expand-btn" onclick="this.parentElement.nextElementSibling.style.display='block';this.parentElement.style.display='none'">展开详情</span>
+        </div>
+        <!-- 工具调用 - 展开状态 -->
+        <div class="tool-calls-detail" style="display:none">
+          <div class="tool-item">
+            <div class="tool-name">search_bookmarks</div>
+            <div class="tool-args">{"query": "", "limit": 100}</div>
+            <div class="tool-result success">✓ 找到 100 条书签</div>
+          </div>
+          <div class="tool-item">
+            <div class="tool-name">list_folders</div>
+            <div class="tool-args">{}</div>
+            <div class="tool-result success">✓ 共 12 个文件夹</div>
+          </div>
+          <div class="tool-item">
+            <div class="tool-name">list_memory</div>
+            <div class="tool-args">{}</div>
+            <div class="tool-result success">✓ 已加载画像和记忆</div>
+          </div>
+          <div style="margin-top: 8px; text-align: right;">
+            <span class="expand-btn" onclick="this.parentElement.parentElement.style.display='none';this.parentElement.parentElement.previousElementSibling.style.display='flex'">收起</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 失败示例 -->
+    <div class="msg assistant">
+      <div class="avatar">AI</div>
+      <div>
+        <div class="bubble">抱歉，执行过程中遇到了一些问题...</div>
+        <div class="time">14:32 · claude-3-5-sonnet</div>
+        <div class="tool-calls-inline">
+          <span>🔧</span>
+          <span class="tool-tag">search_bookmarks</span>
+          <span class="tool-tag failed">web_reader</span>
+          <span class="expand-btn">展开详情</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 方案 B：卡片式 -->
+<div class="demo-section">
+  <h2>方案 B：卡片式</h2>
+  <p style="font-size: 13px; color: #666; margin-bottom: 16px;">
+    用卡片包裹工具列表，更紧凑但不够直观。
+  </p>
+
+  <div class="chat-container">
+    <div class="msg assistant">
+      <div class="avatar">AI</div>
+      <div>
+        <div class="bubble">找到了 5 组重复书签...</div>
+        <div class="tool-calls-card" onclick="this.classList.toggle('expanded')">
+          <div class="header">
+            <span class="icon">🔧</span>
+            <span>使用了 3 个工具</span>
+            <span class="count">点击展开</span>
+          </div>
+          <div class="content">
+            <div class="tool-item">
+              <div class="tool-name" style="font-family:monospace;font-weight:600;color:#667eea">search_bookmarks</div>
+              <div style="margin-top:2px;font-size:11px;color:#888">搜索书签</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name" style="font-family:monospace;font-weight:600;color:#667eea">list_folders</div>
+              <div style="margin-top:2px;font-size:11px;color:#888">列出文件夹</div>
+            </div>
+            <div class="tool-item">
+              <div class="tool-name" style="font-family:monospace;font-weight:600;color:#667eea">list_memory</div>
+              <div style="margin-top:2px;font-size:11px;color:#888">加载记忆</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 对比 -->
+<div class="demo-section">
+  <h2>方案对比</h2>
+  <div class="comparison">
+    <table>
+      <thead>
+        <tr>
+          <th>方案</th>
+          <th>特点</th>
+          <th>推荐</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>A. 紧凑行</td>
+          <td>标签 + 展开详情，直观清晰</td>
+          <td><span class="tag recommend">推荐</span></td>
+        </tr>
+        <tr>
+          <td>B. 卡片式</td>
+          <td>更紧凑，但不够直观</td>
+          <td></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 说明 -->
+<div class="note">
+  <strong>显示规则：</strong><br>
+  1. 前 3 个工具名用标签显示，逗号分隔<br>
+  2. 超过 3 个显示「...」<br>
+  3. 工具调用失败时标签标红<br>
+  4. 点击「展开详情」显示完整列表 + 参数 + 结果
+</div>
+
+</body>
+</html>
