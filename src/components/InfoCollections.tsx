@@ -18,6 +18,8 @@ type Copy = {
   en: string;
 };
 
+type SectionTone = "sky" | "emerald" | "amber" | "rose" | "cyan" | "slate";
+
 interface CollectionItem {
   title: string;
   url: string;
@@ -25,12 +27,19 @@ interface CollectionItem {
   description: Copy;
 }
 
+interface CollectionSection {
+  title: Copy;
+  tone?: SectionTone;
+  items: CollectionItem[];
+}
+
 interface CollectionGroup {
   title: Copy;
   subtitle: Copy;
   Icon: LucideIcon;
   accent: string;
-  items: CollectionItem[];
+  items?: CollectionItem[];
+  sections?: CollectionSection[];
 }
 
 const NEWSNOW_URL = "https://newsnow.busiyi.world/";
@@ -40,6 +49,33 @@ const NEWSNOW_URL = "https://newsnow.busiyi.world/";
 // （上一轮 0.62 为了勉强填出 3 列导致文字偏小，这里以「反向思路」调整：
 //  同时压缩 sidebar 到 260px，让 iframe 列能够容纳更高 scale。）
 const NEWSNOW_FRAME_SCALE = 0.70;
+
+const SECTION_TONE_STYLES: Record<SectionTone, { panel: string; chip: string }> = {
+  sky: {
+    panel: "border-sky-200/60 bg-sky-50/40 dark:border-sky-800/40 dark:bg-sky-950/20",
+    chip: "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-300",
+  },
+  emerald: {
+    panel: "border-emerald-200/60 bg-emerald-50/40 dark:border-emerald-800/40 dark:bg-emerald-950/20",
+    chip: "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-300",
+  },
+  amber: {
+    panel: "border-amber-200/60 bg-amber-50/40 dark:border-amber-800/40 dark:bg-amber-950/20",
+    chip: "bg-amber-500/10 text-amber-700 ring-amber-500/20 dark:text-amber-300",
+  },
+  rose: {
+    panel: "border-rose-200/60 bg-rose-50/40 dark:border-rose-800/40 dark:bg-rose-950/20",
+    chip: "bg-rose-500/10 text-rose-700 ring-rose-500/20 dark:text-rose-300",
+  },
+  cyan: {
+    panel: "border-cyan-200/60 bg-cyan-50/40 dark:border-cyan-800/40 dark:bg-cyan-950/20",
+    chip: "bg-cyan-500/10 text-cyan-700 ring-cyan-500/20 dark:text-cyan-300",
+  },
+  slate: {
+    panel: "border-slate-200/60 bg-slate-50/40 dark:border-slate-800/40 dark:bg-slate-950/20",
+    chip: "bg-slate-500/10 text-slate-700 ring-slate-500/20 dark:text-slate-300",
+  },
+};
 
 const COLLECTIONS: CollectionGroup[] = [
   {
@@ -72,86 +108,155 @@ const COLLECTIONS: CollectionGroup[] = [
     ],
   },
   {
-    title: { zh: "信息差工具", en: "Resource tools" },
+    title: { zh: "资源工具", en: "Resource tools" },
     subtitle: {
-      zh: "AI 中转、公益站与内容检索入口",
-      en: "AI relays, public AI sites and useful indexes",
+      zh: "AI 比价、中转、账号入口、号池接码与素材检索",
+      en: "AI pricing, relays, account entries, number pools and content discovery",
     },
     Icon: Sparkles,
     accent:
       "from-amber-500/20 to-rose-500/20 text-amber-600 dark:text-amber-300",
-    items: [
+    sections: [
       {
-        title: "tokennav.cc",
-        url: "https://tokennav.cc",
-        tag: { zh: "Token 比价", en: "Token prices" },
-        description: {
-          zh: "API 中转服务比价入口，适合先看价格区间",
-          en: "API relay price comparison for quick market checks",
-        },
+        title: { zh: "AI 比价 / 中转", en: "AI pricing / relays" },
+        tone: "sky",
+        items: [
+          {
+            title: "tokennav.cc",
+            url: "https://tokennav.cc",
+            tag: { zh: "Token 比价", en: "Token prices" },
+            description: {
+              zh: "API 中转服务比价入口，适合先看价格区间",
+              en: "API relay price comparison for quick market checks",
+            },
+          },
+          {
+            title: "aibijia.org",
+            url: "https://aibijia.org",
+            tag: { zh: "Token 比价", en: "Token prices" },
+            description: {
+              zh: "同类 API 中转比价，补充价格和供应商参考",
+              en: "Another API relay price index for supplier comparison",
+            },
+          },
+          {
+            title: "HelpAIO Transit",
+            url: "https://www.helpaio.com/transit",
+            tag: { zh: "AI 中转合集", en: "AI relays" },
+            description: {
+              zh: "AI API 中转站合集，适合横向对比可用服务",
+              en: "AI API relay collection for comparing available services",
+            },
+          },
+          {
+            title: "GPT Bargain",
+            url: "https://gptbargain.highkay.qzz.io/search?code=linux_do_friend",
+            tag: { zh: "GPT 比价", en: "GPT bargain" },
+            description: {
+              zh: "带 code=linux_do_friend 的 GPT 比价入口",
+              en: "GPT bargain entry with code=linux_do_friend",
+            },
+          },
+          {
+            title: "Nerver AC",
+            url: "https://cha.nerver.cc/",
+            tag: { zh: "资格检查", en: "Eligibility" },
+            description: {
+              zh: "ChatGPT accessToken 有效性与活动资格预检入口",
+              en: "Pre-check ChatGPT accessToken validity and activity eligibility",
+            },
+          },
+        ],
       },
       {
-        title: "aibijia.org",
-        url: "https://aibijia.org",
-        tag: { zh: "Token 比价", en: "Token prices" },
-        description: {
-          zh: "同类 API 中转比价，补充价格和供应商参考",
-          en: "Another API relay price index for supplier comparison",
-        },
+        title: { zh: "号池 / 接码", en: "Number pools / SMS" },
+        tone: "amber",
+        items: [
+          {
+            title: "LiveTools Workspace",
+            url: "https://trade.livetools.top/workspace",
+            tag: { zh: "号池交易", en: "Pool trading" },
+            description: {
+              zh: "LiveTools 号池交易平台入口",
+              en: "LiveTools number pool trading platform",
+            },
+          },
+          {
+            title: "接码平台导航",
+            url: "https://www.zhihu.com/question/625711915",
+            tag: { zh: "接码平台", en: "SMS platforms" },
+            description: {
+              zh: "国内外接码平台汇总与使用指南",
+              en: "Domestic and international SMS platform guide",
+            },
+          },
+        ],
       },
       {
-        title: "HelpAIO Transit",
-        url: "https://www.helpaio.com/transit",
-        tag: { zh: "AI 中转合集", en: "AI relays" },
-        description: {
-          zh: "AI API 中转站合集，适合横向对比可用服务",
-          en: "AI API relay collection for comparing available services",
-        },
+        title: { zh: "公益站 / 免费资源", en: "Public AI / Free resources" },
+        tone: "emerald",
+        items: [
+          {
+            title: "LDOH 公益站导航",
+            url: "https://ldoh.105117.xyz/",
+            tag: { zh: "公益站导航", en: "Public AI" },
+            description: {
+              zh: "AI 公益站与免费体验资源导航",
+              en: "Public AI sites and free trial resource navigation",
+            },
+          },
+          {
+            title: "Free ChatGPT",
+            url: "https://freegpt.cc",
+            tag: { zh: "免费 GPT", en: "Free GPT" },
+            description: {
+              zh: "免费 ChatGPT 访问入口",
+              en: "Free ChatGPT access entry",
+            },
+          },
+        ],
       },
       {
-        title: "LDOH 公益站导航",
-        url: "https://ldoh.105117.xyz/",
-        tag: { zh: "公益站导航", en: "Public AI" },
-        description: {
-          zh: "AI 公益站与免费体验资源导航",
-          en: "Public AI sites and free trial resource navigation",
-        },
-      },
-      {
-        title: "wallhaven.cc",
-        url: "https://wallhaven.cc/",
-        tag: { zh: "图片素材", en: "Wallpapers" },
-        description: {
-          zh: "高质量壁纸和图片素材检索入口",
-          en: "High-quality wallpaper and image discovery",
-        },
-      },
-      {
-        title: "greenvideo.cc",
-        url: "https://greenvideo.cc",
-        tag: { zh: "视频检索", en: "Video search" },
-        description: {
-          zh: "视频资源检索入口",
-          en: "Video resource search entry",
-        },
-      },
-      {
-        title: "seedhub.cc",
-        url: "https://seedhub.cc",
-        tag: { zh: "影视索引", en: "Media index" },
-        description: {
-          zh: "影视资源索引入口",
-          en: "Film and series resource index",
-        },
-      },
-      {
-        title: "flacdownloader.com",
-        url: "https://flacdownloader.com",
-        tag: { zh: "无损音乐", en: "Lossless music" },
-        description: {
-          zh: "FLAC 音乐资源检索入口",
-          en: "FLAC music search entry",
-        },
+        title: { zh: "素材检索", en: "Content discovery" },
+        tone: "slate",
+        items: [
+          {
+            title: "wallhaven.cc",
+            url: "https://wallhaven.cc/",
+            tag: { zh: "图片素材", en: "Wallpapers" },
+            description: {
+              zh: "高质量壁纸和图片素材检索入口",
+              en: "High-quality wallpaper and image discovery",
+            },
+          },
+          {
+            title: "greenvideo.cc",
+            url: "https://greenvideo.cc",
+            tag: { zh: "视频检索", en: "Video search" },
+            description: {
+              zh: "视频资源检索入口",
+              en: "Video resource search entry",
+            },
+          },
+          {
+            title: "seedhub.cc",
+            url: "https://seedhub.cc",
+            tag: { zh: "影视索引", en: "Media index" },
+            description: {
+              zh: "影视资源索引入口",
+              en: "Film and series resource index",
+            },
+          },
+          {
+            title: "flacdownloader.com",
+            url: "https://flacdownloader.com",
+            tag: { zh: "无损音乐", en: "Lossless music" },
+            description: {
+              zh: "FLAC 音乐资源检索入口",
+              en: "FLAC music search entry",
+            },
+          },
+        ],
       },
     ],
   },
@@ -166,7 +271,14 @@ export default function InfoCollections({
 }) {
   const lang = resolveLanguage(language);
   const [trendGroup, toolGroup] = COLLECTIONS;
-  const total = 1 + trendGroup.items.length + toolGroup.items.length;
+
+  // 统计总入口数
+  const trendCount = trendGroup.items?.length ?? 0;
+  const toolCount =
+    toolGroup.sections?.reduce((sum, s) => sum + s.items.length, 0) ??
+    toolGroup.items?.length ??
+    0;
+  const total = 1 + trendCount + toolCount;
 
   return (
     <section className={cn("space-y-3.5", className)}>
@@ -382,11 +494,39 @@ function ChipGroup({
           {group.title[lang]}
         </span>
       </div>
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
-        {group.items.map((item) => (
-          <ChipLink key={item.url} item={item} lang={lang} />
-        ))}
-      </div>
+      {group.sections ? (
+        <div className="space-y-2.5">
+          {group.sections.map((section) => {
+            const toneStyle = section.tone
+              ? SECTION_TONE_STYLES[section.tone]
+              : null;
+            return (
+              <div
+                key={section.title[lang]}
+                className={cn(
+                  "space-y-1.5 rounded-lg border p-2",
+                  toneStyle?.panel ?? "border-border/40 bg-muted/20",
+                )}
+              >
+                <div className="px-1 text-[11px] font-medium text-muted-foreground">
+                  {section.title[lang]}
+                </div>
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
+                  {section.items.map((item) => (
+                    <ChipLink key={item.url} item={item} lang={lang} />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
+          {group.items?.map((item) => (
+            <ChipLink key={item.url} item={item} lang={lang} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
