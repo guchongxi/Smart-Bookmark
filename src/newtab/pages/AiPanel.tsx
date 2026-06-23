@@ -216,6 +216,9 @@ export default function AiPanel({ settings }: { settings: Settings }) {
     setSessions((prev) => [s, ...prev]);
     setSessionId(s.id);
     setMessages([]);
+    // 新会话必须清空系统提示词缓存，否则会复用上一个会话的旧 prompt，
+    // 导致最新保存的持久记忆/画像无法带入（首次发消息时在下方 buildSystemPrompt 重建）
+    systemPromptRef.current = "";
     autoConfirmToolNamesRef.current.clear();
     setActivePanel(null);
   }, []);
